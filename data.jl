@@ -34,7 +34,6 @@ function copy_data(seqlen)
 end
 
 
-
 function reverse_data(seqlen)
     data = Any[ rand(0:9) for i=1:seqlen ]
     ygold = Any[ no_op for i=1:seqlen+1 ]
@@ -43,6 +42,37 @@ function reverse_data(seqlen)
     actions = [ goldacts[:moveright] for i=1:seqlen ]
     actions2 = [ goldacts[:moveleft] for i=1:seqlen ]
     acts = append!(actions, actions2)
+    return (data, ygold, actions)
+end
+
+
+function addition_data(seqlen)
+    low = parse("1"*"0"^(seqlen - 1))
+    hi = parse("1"*"0"^seqlen) - 1
+    n1 = rand(low:hi)
+    n2 = rand(0:hi)
+    data = (n1, n2)
+    ygold = n1 + n2
+    compound_move = Any[goldacts[:down], goldacts[:moveleft], goldacts[:up]]
+
+    arrived = 1
+    if arrived == seqlen
+        actions = compound_move
+        return (data, ygold, actions)
+    end
+    actions = []
+    while true
+        append!(actions, compound_move); arrived += 1;
+        (arrived == seqlen) && break
+        append!(actions, [goldacts[:moveleft]]); arrived +=1;
+        (arrived == seqlen) && break
+    end
+    if seqlen % 2 == 1
+        append!(actions, compound_move)
+    else
+        append!(actions, [goldacts[:moveleft]])
+        append!(actions, [goldacts[:down]])
+    end
     return (data, ygold, actions)
 end
 
