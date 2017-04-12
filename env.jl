@@ -18,7 +18,7 @@ end
 function init_game(x,y,actions,task)
     ninstances = length(x)
     input_tapes = x
-    output_tapes = map(Any[], 1:ninstances)
+    output_tapes = map(i->Any[], 1:ninstances)
     lens = map(xi->size(xi,2), x)
     pointers = init_pointers(lens,ninstances,task)
     symgold = y
@@ -28,7 +28,7 @@ function init_game(x,y,actions,task)
 end
 
 function init_pointers(lens, ninstances,task) # assume task is copy
-    map([1,1], 1:ninstances)
+    map(i->[1,1], 1:ninstances)
 end
 
 function move_timestep!(g)
@@ -48,9 +48,9 @@ end
 function make_input(g, s2i)
     values = map(i->g.InputTapes[i][g.pointers[i]...], 1:g.ninstances)
     decoded = map(v->s2i[v], values)
-    input = zeros(length(s2i), ninstances)
-    for k = 1:length(values)
-        input[values[k],k] = 1
+    input = zeros(length(s2i), g.ninstances)
+    for k = 1:length(decoded)
+        input[decoded[k],k] = 1
     end
     return input
 end

@@ -1,4 +1,4 @@
-const symbols = [0:9..., :noop]
+symbols = [0:10...]
 
 function initvocab(symbols)
     sort!(symbols)
