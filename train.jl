@@ -4,9 +4,8 @@ using JLD
 
 include("env.jl")
 include("model.jl")
-include("data_generator.jl")
+include("data.jl")
 include("vocab.jl")
-include("init.jl")
 
 function main(args)
     s = ArgParseSettings()
