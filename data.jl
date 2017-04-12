@@ -76,4 +76,16 @@ function addition_data(seqlen)
     return (data, ygold, actions)
 end
 
+
+function mul_data(seqlen)
+    hi = parse("1"*"0"^seqlen) - 1
+    n = rand(1:hi)
+    digit = rand(0:9)
+    data = (digit, n)
+    ygold = n * digit
+    actions = append!([goldacts[:down]], [ goldacts[:moveleft] for i=1:seqlen+1])
+
+    return (data, ygold, actions)
+end
+
 !isinteractive() && !isdefined(Core.Main, :load_only) && main(ARGS)
