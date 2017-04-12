@@ -46,7 +46,7 @@ function reverse_data(seqlen)
 end
 
 
-function addition_data(seqlen)
+function add_data(seqlen)
     low = parse("1"*"0"^(seqlen - 1))
     hi = parse("1"*"0"^seqlen) - 1
     n1 = rand(low:hi)
