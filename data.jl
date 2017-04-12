@@ -1,7 +1,6 @@
 # data generation file
 # action set:
 # "mr" -> move right
-
 const complexities = Dict{AbstractString, Int}("copy"=>1,
                                                "reverse"=>2,
                                                "walk"=>1,
@@ -9,9 +8,10 @@ const complexities = Dict{AbstractString, Int}("copy"=>1,
                                                "radd"=>3,
                                                "mul"=>1)
 const goldacts = Dict{Symbol, AbstractString}(:moveright=>"mr",
-                                             :moveleft=>"mr",
+                                             :moveleft=>"ml",
                                              :up=>"up",
                                               :down=>"down")
+const no_op = -1
 
 """
 experiment is a string given as lowercase name
@@ -34,11 +34,16 @@ function copy_data(seqlen)
 end
 
 
-function reverse_data(seqlen::Int)
+
+function reverse_data(seqlen)
     data = Any[ rand(0:9) for i=1:seqlen ]
-    ygold = reverse(data)
-    push!(ygold, -1)
+    ygold = Any[ no_op for i=1:seqlen+1 ]
+    append!(ygold, reverse(data))
     push!(data, "r")
     actions = [ goldacts[:moveright] for i=1:seqlen ]
+    actions2 = [ goldacts[:moveleft] for i=1:seqlen ]
+    acts = append!(actions, actions2)
     return (data, ygold, actions)
 end
+
+!isinteractive() && !isdefined(Core.Main, :load_only) && main(ARGS)
