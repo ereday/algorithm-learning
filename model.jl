@@ -1,10 +1,10 @@
-function feedforward(w,b,x)
-    w * x .+ b
+function feedforward(w,x)
+    tanh(w[:wfeed] * x .+ w[:bfeed])
 end
 
 function loss(w,x,ygold)
-    x = feedforward(w[1],w[2],x)
-    ypred = w[3]*x .+ w[4]
+    x = feedforward(w,x)
+    ypred = w[:wsoft]*x .+ w[:bsoft]
     return logprob(ygold, ypred)
 end
 
