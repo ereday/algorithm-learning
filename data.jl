@@ -79,11 +79,66 @@ end
 
 function mul_data(seqlen)
     hi = parse("1"*"0"^seqlen) - 1
-    n = rand(1:hi)
+    low = parse("1"*"0"^(seqlen - 1))
+    n = rand(low:hi)
     digit = rand(0:9)
     data = (digit, n)
     ygold = n * digit
     actions = append!([goldacts[:down]], [ goldacts[:moveleft] for i=1:seqlen+1])
+
+    return (data, ygold, actions)
+end
+
+
+function radd_data(seqlen)
+    hi = parse("1"*"0"^seqlen) - 1
+    low = parse("1"*"0"^(seqlen - 1))
+    n = rand(low:hi)
+    n2 = rand(1:hi) 
+    n3 = rand(1:hi)
+
+    data = (n, n2, n3)
+    ygold = n + n2 + n3
+    compound_action = Any[ goldacts[:down], goldacts[:down], goldacts[:moveleft], goldacts[:up], goldacts[:up]]
+
+
+    arrived = 1
+    if arrived == seqlen
+        actions = [ goldacts[:down], goldacts[:down], goldacts[:moveleft], goldacts[:up]]
+        return (data, ygold, actions)
+    end
+    if seqlen == 2
+        actions = append!(compound_action, [ goldacts[:moveleft], goldacts[:down]])
+        return (data, ygold, actions)
+    end
+    
+    actions = []
+    while true
+        append!(actions, compound_action); arrived +=1;
+        (arrived == seqlen-1) && break
+        append!(actions, [goldacts[:moveleft]]); arrived +=1;
+        (arrived == seqlen-1) && break
+    end
+    
+    fs(num) = length(digits(num))
+    second_big = ( fs(n2) > fs(n3) ? fs(n2) : fs(n3) )
+    
+    if seqlen % 2 == 1
+        append!(actions, [ goldacts[:moveleft] ])
+        if second_big == seqlen
+            append!(actions, [ goldacts[:down] ])
+            if fs(n2) == fs(n3)
+                append!(actions, [ goldacts[:down], goldacts[:moveleft], goldacts[:up] ])
+            else
+                append!(actions, [ goldacts[:down], goldacts[:moveleft] ])
+            end
+        else
+            append!(actions, [ goldacts[:down], goldacts[:down] ])
+        end
+    else
+        append!(actions, compound_action)
+        append!(actions, [ goldacts[:moveleft], goldacts[:down] ])
+    end
 
     return (data, ygold, actions)
 end
