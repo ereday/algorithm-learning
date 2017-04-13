@@ -28,21 +28,18 @@ function logprob(output, ypred)
     return o3
 end
 
-function initweights(atype,units,nsymbols,winit=0.01)
+function initweights(atype,units,dist,nsymbols,winit=0.01)
     w = Dict()
-#=
-    w[:wfeed] = winit*randn(Float32, units, nsymbols)
+    winit = (dist=="xavier") ? 1.0 : winit
+    _dist = eval(Symbol(dist))
+
+    w[:wfeed] = _dist(Float32, units, nsymbols)
     w[:bfeed] = zeros(Float32, units, 1)
-    w[:wsoft] = winit*randn(Float32, nsymbols, units)
-    w[:bsoft] = zeros(Float32, nsymbols, 1)
-    =#
-    w[:wfeed] = xavier(Float32, units, nsymbols)
-    w[:bfeed] = zeros(Float32, units, 1)
-    w[:wsoft] = xavier(Float32, nsymbols, units)
+    w[:wsoft] = _dist(Float32, nsymbols, units)
     w[:bsoft] = zeros(Float32, nsymbols, 1)
     
     for (k,v) in w
-        w[k] = convert(atype, v)
+        w[k] = convert(atype, v * winit)
     end
 
     return w

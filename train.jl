@@ -25,6 +25,7 @@ function main(args)
         ("--nvalid"; default=60; arg_type=Int64)
         ("--atype"; default=(gpu()>=0 ? "KnetArray{Float32}" : "Array{Float32}"))
         ("--period"; default=100; arg_type=Int64)
+        ("--dist";arg_type=String;default="randn";help="[randn|xavier]")        
         # ("--nsymbols"; default=11; arg_type=Int64)
     end
 
@@ -36,7 +37,7 @@ function main(args)
 
     # init model, params etc.
     s2i, i2s = initvocab(symbols)
-    w = initweights(o[:atype],o[:units],length(symbols))
+    w = initweights(o[:atype],o[:units],o[:dist],length(symbols))
     opts = initopts(w)
 
     for c = o[:start]:o[:step]:o[:end]
