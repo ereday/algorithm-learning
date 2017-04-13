@@ -1,5 +1,5 @@
 function feedforward(w,x)
-    tanh(w[:wfeed] * x .+ w[:bfeed])
+    relu(w[:wfeed] * x .+ w[:bfeed])
 end
 
 function predict(w,x)
@@ -13,7 +13,7 @@ function loss(w,x,ygold; values=[])
     batchsize = size(x,2)
     ypred = predict(w,x)
     lossval = logprob(ygold,ypred)
-    push!(values, AutoGrad.getval(lossval))
+    push!(values, AutoGrad.getval(-lossval))
     return -lossval/batchsize
 end
 
@@ -30,11 +30,17 @@ end
 
 function initweights(atype,units,nsymbols,winit=0.01)
     w = Dict()
+#=
     w[:wfeed] = winit*randn(Float32, units, nsymbols)
     w[:bfeed] = zeros(Float32, units, 1)
     w[:wsoft] = winit*randn(Float32, nsymbols, units)
     w[:bsoft] = zeros(Float32, nsymbols, 1)
-
+    =#
+    w[:wfeed] = xavier(Float32, units, nsymbols)
+    w[:bfeed] = zeros(Float32, units, 1)
+    w[:wsoft] = xavier(Float32, nsymbols, units)
+    w[:bsoft] = zeros(Float32, nsymbols, 1)
+    
     for (k,v) in w
         w[k] = convert(atype, v)
     end

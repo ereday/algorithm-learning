@@ -36,6 +36,7 @@ function move_timestep!(g)
         action = g.actions[k][g.timestep]
         if action == "mr"
             g.pointers[k][1] += 1
+            
         elseif action == "ml"
             g.pointers[k][1] -= 1
         else

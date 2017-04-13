@@ -19,12 +19,12 @@ function main(args)
         ("--units"; default=200)
         ("--discount"; default=0.95)
         ("--start"; default=6; arg_type=Int64)
-        ("--end"; default=1000; arg_type=Int64)
+        ("--end"; default=50; arg_type=Int64)
         ("--step"; default=4; arg_type=Int64)
         ("--batchsize"; default=20; arg_type=Int64)
         ("--nvalid"; default=60; arg_type=Int64)
         ("--atype"; default=(gpu()>=0 ? "KnetArray{Float32}" : "Array{Float32}"))
-        ("--period"; default=50; arg_type=Int64)
+        ("--period"; default=100; arg_type=Int64)
         # ("--nsymbols"; default=11; arg_type=Int64)
     end
 
@@ -115,6 +115,7 @@ function validate(w,s2i,i2s,data,o)
                     correctness[i] = false
                 end
             end
+            move_timestep!(game)
         end
         ncorrect += sum(correctness)
     end
