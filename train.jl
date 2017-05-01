@@ -30,7 +30,7 @@ function main(args)
     end
 
     isa(args, AbstractString) && (args=split(args))
-    o = parse_args(args, s; as_symbols=true); display(o); println(); flush(STDOUT)
+    o = parse_args(args, s; as_symbols=true); println(o); flush(STDOUT)
     s = o[:seed] > 0 ? srand(o[:seed]) : srand()
     o[:atype] = eval(parse(o[:atype]))
     data_generator = get_data_generator(o[:task])
@@ -49,6 +49,7 @@ function main(args)
         lossval = 0
 
         while true
+        # for iter = 1:500 # for debug
             trn = map(xi->data_generator(seqlen), 1:o[:batchsize])
             x = map(xi->xi[1], trn)
             y = map(xi->xi[2], trn)
@@ -118,7 +119,6 @@ function validate(w,s2i,i2s,a2i,i2a,data,o)
             y1,y2 = make_output(game, s2i, a2i)
             x1 = convert(o[:atype], x1)
             x2 = convert(o[:atype], x2)
-            batchsize = size(x,2)
             cout = propagate(w,vcat(x1,x2))
             y1pred = predict(w[:wsymb],w[:bsymb],cout)
             y2pred = predict(w[:wact],w[:bact],cout)

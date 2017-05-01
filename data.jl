@@ -38,7 +38,7 @@ function reverse_data(seqlen)
     data = Any[ rand(0:9) for i=1:seqlen ]
     ygold = Any[ no_op for i=1:seqlen+1 ]
     append!(ygold, reverse(data))
-    push!(data, "r")
+    push!(data, -2)
     actions = [ goldacts[:moveright] for i=1:seqlen ]
     actions2 = [ goldacts[:moveleft] for i=1:seqlen ]
     acts = append!(actions, actions2)

@@ -30,7 +30,7 @@ type Game
         timestep = 1
 
         new(
-            N,xtapes,ytapes,xactions,yactions,
+            N,xtapes,ytapes,yactions,xactions,
             task,pointers,symgold,timestep)
     end
 end
@@ -66,8 +66,8 @@ function make_input(g, s2i, a2i)
     # x2 => onehots, x21 => values, x22 => decoded (actions)
     x2  = zeros(Float32, length(a2i), g.ninstances)
     x21 = map(i->g.prev_actions[i][g.timestep], 1:g.ninstances)
-    x22 = map(v->s2i[v], x11)
-    for k = 1:length(x22); x1[x22[k],k] = 1; end
+    x22 = map(v->a2i[v], x21)
+    for k = 1:length(x22); x2[x22[k],k] = 1; end
 
     return x1,x2
 end
