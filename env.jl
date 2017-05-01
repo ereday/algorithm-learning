@@ -70,26 +70,11 @@ function make_input(g, s2i, a2i)
 end
 
 function make_output(g, s2i, a2i)
-    x10 = map(i->g.symgold[i][g.timestep], 1:g.ninstances)
-    x11 = map(v->s2i[v], x10)
+    y10 = map(i->g.symgold[i][g.timestep], 1:g.ninstances)
+    y11 = map(yi->s2i[yi], y10)
 
-    x20 = map(i->g.next_[i][g.timestep], 1:g.ninstances)
+    y20 = map(i->g.next_actions[i][g.timestep], 1:g.ninstances)
+    y21 = map(yi->a2i[yi], y20)
 
-    x1  = zeros(Float32, length(s2i), g.ninstances)
-    x11 = map(i->g.InputTapes[i][g.pointers[i]...], 1:g.ninstances)
-    x12 = map(v->s2i[v], x11)
-    for k = 1:length(x12); x1[x12[k],k] = 1; end
-
-    # x2 => onehots, x21 => values, x22 => decoded (actions)
-    x2  = zeros(Float32, length(a2i), g.ninstances)
-    x21 = map(i->g.prev_actions[i][g.timestep], 1:g.ninstances)
-    x22 = map(v->s2i[v], x11)
-    for k = 1:length(x22); x1[x22[k],k] = 1; end
-
-    return x1,x2
-
-
-    values = map(i->g.symgold[i][g.timestep], 1:g.ninstances)
-    output = map(v->s2i[v], values)
-    return output
+    return y11, y21
 end
