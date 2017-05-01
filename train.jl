@@ -54,9 +54,10 @@ function main(args)
             y = map(xi->xi[2], trn)
             actions = map(xi->xi[3], trn)
             game = Game(x,y,actions)
+            T = length(game.symgold[1])
 
             batchloss = 0
-            for k = 1:seqlen
+            for k = 1:T
                 # info("trn, timestep=$k")
                 x1,x2 = make_input(game, s2i, a2i)
                 y1,y2 = make_output(game, s2i, a2i)
@@ -69,7 +70,7 @@ function main(args)
                 a1 = map(ai->ai[game.timestep], a0)
                 move_timestep!(game,a1)
             end
-            batchloss = batchloss / seqlen
+            batchloss = batchloss / T
             if iter < 100
                 lossval = (iter-1)*lossval + batchloss
                 lossval = lossval / iter
@@ -108,10 +109,11 @@ function validate(w,s2i,i2s,a2i,i2a,data,o)
         y = map(xi->xi[2], batch)
         actions = map(xi->xi[3], batch)
         game = Game(x,y,actions)
+        T = length(game.symgold[1])
 
-        seqlen = length(y[1])
+        # seqlen = length(y[1])
         correctness = trues(length(batch))
-        for k = 1:seqlen
+        for k = 1:T
             x1,x2 = make_input(game, s2i, a2i)
             y1,y2 = make_output(game, s2i, a2i)
             x1 = convert(o[:atype], x1)
@@ -138,7 +140,7 @@ function validate(w,s2i,i2s,a2i,i2a,data,o)
             end
 
             game.prev_actions[game.timestep] = vec(y2pred)
-            move_timestep!(game,game.)
+            move_timestep!(game,y2pred)
         end
         ncorrect += sum(correctness)
     end

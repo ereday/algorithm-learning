@@ -26,7 +26,7 @@ type Game
         # pointer <=> head
         lens = map(xi->size(xi,2), x)
         pointers = init_pointers(lens,N,task)
-        symgold = y
+        symgold = [y...,-1]
         timestep = 1
 
         new(

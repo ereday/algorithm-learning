@@ -1,4 +1,4 @@
-const SYMBOLS = (0:10...)
+const SYMBOLS = (-1:9...)
 
 function initvocab(symbols)
     symbols = collect(symbols)
