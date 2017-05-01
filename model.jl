@@ -2,17 +2,28 @@ function feedforward(w,x)
     relu(w[:wfeed] * x .+ w[:bfeed])
 end
 
-function predict(w,x)
-    # x = w[:wemb] * x
-    x = feedforward(w,x)
-    ypred = w[:wsoft]*x .+ w[:bsoft]
-    return ypred
-end
+propagate(w,x) = feedforward(w,x)
+predict(w,b,x) = w * x .+ b
 
-function loss(w,x,ygold; values=[])
+# x1,y1 => input/output for symbols
+# x2,y2 => input/output for actions
+# weighted loss for soft symbol/action distributions
+function loss(w,x1,y1,x2,y2; values=[])
     batchsize = size(x,2)
-    ypred = predict(w,x)
-    lossval = logprob(ygold,ypred)
+
+    # controller
+    cout = propagate(w,x)
+
+    # predictions
+    y1pred = predict(w[:wsymb],w[:bsymb],x1)
+    y2pred = predict(w[:wact],w[:bact],x2)
+
+    # log probabilities
+    lossval1 = logprob(y1,y1pred)
+    lossval2 = logprob(y2,y2pred)
+
+    # combined loss
+    lossval = 0.5*(lossval1+lossval2)
     push!(values, AutoGrad.getval(-lossval))
     return -lossval/batchsize
 end
@@ -28,18 +39,20 @@ function logprob(output, ypred)
     return o3
 end
 
-function initweights(atype,units,dist,nsymbols,winit=0.01)
+function initweights(atype,units,nsymbols,nactions,dist="randn", winit=0.01)
     w = Dict()
     winit = (dist=="xavier") ? 1.0 : winit
     _dist = eval(Symbol(dist))
 
-    w[:wfeed] = _dist(Float32, units, nsymbols)
+    w[:wfeed] = _dist(Float32, units, nsymbols+nactions)
     w[:bfeed] = zeros(Float32, units, 1)
-    w[:wsoft] = _dist(Float32, nsymbols, units)
-    w[:bsoft] = zeros(Float32, nsymbols, 1)
-    
+    w[:wsymb] = _dist(Float32, nsymbols, units)
+    w[:bsymb] = zeros(Float32, nsymbols, 1)
+    w[:wact]  = _dist(Float32, nactions, units)
+    w[:bact]  = zeros(Float32, nactions, 1)
+
     for (k,v) in w
-        w[k] = convert(atype, v * winit)
+        w[k] = convert(atype, v*winit)
     end
 
     return w
