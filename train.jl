@@ -139,7 +139,9 @@ function validate(w,s2i,i2s,a2i,i2a,data,o)
                 end
             end
 
-            game.prev_actions[game.timestep] = vec(y2pred)
+            for i = 1:game.ninstances
+                game.prev_actions[i][k] = y2pred[i]
+            end
             move_timestep!(game,y2pred)
         end
         ncorrect += sum(correctness)
