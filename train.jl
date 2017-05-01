@@ -14,7 +14,7 @@ function main(args)
     @add_arg_table s begin
         # load/save files
         ("--task"; default="copy")
-        ("--seed"; default=-1; help="random seed")
+        ("--seed"; default=-1; arg_type=Int64; help="random seed")
         ("--lr"; default=0.001)
         ("--units"; default=200)
         ("--discount"; default=0.95)
@@ -36,8 +36,10 @@ function main(args)
     data_generator = get_data_generator(o[:task])
 
     # init model, params etc.
-    s2i, i2s = initvocab(symbols)
-    w = initweights(o[:atype],o[:units],o[:dist],length(symbols))
+    s2i, i2s = initvocab(SYMBOLS)
+    a2i, i2a = initvocab(ACTIONS)
+    w = initweights(
+        o[:atype],o[:units],length(s2i),length(a2i),o[:dist])
     opts = initopts(w)
 
     for c = o[:start]:o[:step]:o[:end]
@@ -51,16 +53,21 @@ function main(args)
             x = map(xi->xi[1], trn)
             y = map(xi->xi[2], trn)
             actions = map(xi->xi[3], trn)
-            game = init_game(x,y,actions,o[:task])
+            game = Game(x,y,actions)
 
             batchloss = 0
             for k = 1:seqlen
-                input = make_input(game, s2i)
-                output = make_output(game, s2i)
-                input = convert(o[:atype], input)
-                this_loss = train!(w,input,output,opts)
+                # info("trn, timestep=$k")
+                x1,x2 = make_input(game, s2i, a2i)
+                y1,y2 = make_output(game, s2i, a2i)
+                x1 = convert(o[:atype], x1)
+                x2 = convert(o[:atype], x2)
+                this_loss = train!(w,x1,y1,x2,y2,opts)
                 batchloss += this_loss
-                move_timestep!(game)
+
+                a0 = game.next_actions
+                a1 = map(ai->ai[game.timestep], a0)
+                move_timestep!(game,a1)
             end
             batchloss = batchloss / seqlen
             if iter < 100
@@ -73,7 +80,7 @@ function main(args)
             # perform the validation
             if iter % o[:period] == 0
                 info("batchloss:$batchloss")
-                acc = validate(w,s2i,i2s,val,o)
+                acc = validate(w,s2i,i2s,a2i,i2a,val,o)
                 info("(iter:$iter,acc:$acc)")
                 if acc > 0.98
                     info("$c converged in $iter iteration")
@@ -86,37 +93,52 @@ function main(args)
     end
 end
 
-function train!(w,x,y,opts)
+function train!(w,x1,y1,x2,y2,opts)
     values = []
-    gloss = lossgradient(w,x,y; values=values)
+    gloss = lossgradient(w,x1,y1,x2,y2; values=values)
     update!(w, gloss, opts)
     return values[1]
 end
 
-function validate(w,s2i,i2s,data,o)
+function validate(w,s2i,i2s,a2i,i2a,data,o)
     batches = map(i->data[i:i+o[:batchsize]-1], [1:o[:batchsize]:length(data)...])
     ncorrect = 0
     for batch in batches
         x = map(xi->xi[1], batch)
         y = map(xi->xi[2], batch)
         actions = map(xi->xi[3], batch)
-        game = init_game(x,y,actions,o[:task])
+        game = Game(x,y,actions)
+
         seqlen = length(y[1])
         correctness = trues(length(batch))
         for k = 1:seqlen
-            input = make_input(game, s2i)
-            output = make_output(game, s2i)
-            input = convert(o[:atype], input)
-            ypred = predict(w,input) # (K,B)
-            ypred = convert(Array, ypred)
-            ypred = mapslices(indmax,ypred,1)
-            ypred = map(y->i2s[y], ypred)
-            for i = 1:length(ypred)
-                if ypred[i] != y[i][k]
+            x1,x2 = make_input(game, s2i, a2i)
+            y1,y2 = make_output(game, s2i, a2i)
+            x1 = convert(o[:atype], x1)
+            x2 = convert(o[:atype], x2)
+            batchsize = size(x,2)
+            cout = propagate(w,vcat(x1,x2))
+            y1pred = predict(w[:wsymb],w[:bsymb],cout)
+            y2pred = predict(w[:wact],w[:bact],cout)
+
+            # ypred = predict(w,input) # (K
+            y1pred = convert(Array, y1pred)
+            y1pred = mapslices(indmax,y1pred,1)
+            y1pred = map(yi->i2s[yi], y1pred)
+
+            y2pred = convert(Array, y2pred)
+            y2pred = mapslices(indmax,y2pred,1)
+            y2pred = map(yi->i2a[yi], y2pred)
+
+            # check correctness
+            for i = 1:length(y1pred)
+                if y1pred[i] != y[i][k]
                     correctness[i] = false
                 end
             end
-            move_timestep!(game)
+
+            game.prev_actions[game.timestep] = vec(y2pred)
+            move_timestep!(game,game.)
         end
         ncorrect += sum(correctness)
     end

@@ -1,6 +1,7 @@
-symbols = [0:10...]
+const SYMBOLS = (0:10...)
 
 function initvocab(symbols)
+    symbols = collect(symbols)
     sort!(symbols)
     s2i, i2s = Dict(), Dict()
     c = 1

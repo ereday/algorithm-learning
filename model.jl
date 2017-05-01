@@ -9,14 +9,14 @@ predict(w,b,x) = w * x .+ b
 # x2,y2 => input/output for actions
 # weighted loss for soft symbol/action distributions
 function loss(w,x1,y1,x2,y2; values=[])
-    batchsize = size(x,2)
+    batchsize = size(x1,2)
 
     # controller
-    cout = propagate(w,x)
+    cout = propagate(w,vcat(x1,x2))
 
     # predictions
-    y1pred = predict(w[:wsymb],w[:bsymb],x1)
-    y2pred = predict(w[:wact],w[:bact],x2)
+    y1pred = predict(w[:wsymb],w[:bsymb],cout)
+    y2pred = predict(w[:wact],w[:bact],cout)
 
     # log probabilities
     lossval1 = logprob(y1,y1pred)

@@ -1,4 +1,4 @@
-const ACTIONS = (values(goldacts)..., "<s>")
+const ACTIONS = ("mr","ml","up","down", "<s>")
 # <s> token stands for start in input, stop in output
 
 type Game
@@ -42,13 +42,16 @@ end
 # now only just for copy and reverse tasks
 function move_timestep!(g,actions)
     for k = 1:g.ninstances
+        # info(actions)
         action = actions[k]
         if action == "mr"
             g.pointers[k][1] += 1
         elseif action == "ml"
             g.pointers[k][1] -= 1
+        elseif action == "<s>"
+            # do nothing
         else
-            error("zaa xd")
+            error("zaa xd $action")
         end
     end
     g.timestep += 1
