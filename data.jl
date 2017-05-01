@@ -40,7 +40,7 @@ function reverse_data(seqlen)
     append!(ygold, reverse(data))
     push!(data, -2)
     actions = [ goldacts[:moveright] for i=1:seqlen ]
-    actions2 = [ goldacts[:moveleft] for i=1:seqlen ]
+    actions2 = [ goldacts[:moveleft] for i=1:seqlen+1 ]
     acts = append!(actions, actions2)
     return (data, ygold, actions)
 end
