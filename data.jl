@@ -78,6 +78,36 @@ function add_data(seqlen)
     return (data, ygold, actions)
 end
 
+function walk_data(seqlen) 
+    downarrow = -1
+    leftarrow = -2
+    uparrow   = -3
+    width = Int(seqlen/2)
+    if rand() < 0.5
+        xpos = 1
+        arrow = (rand() < 0.5 )? downarrow : leftarrow
+    else
+        xpos = width # height
+        arrow = (rand() < 0.5) ? uparrow : leftarrow
+    end
+    data = rand(1:9,width,width)
+    data[xpos,width] = arrow
+
+    actions = map(x->goldacts[:moveright],1:width-1)
+    if arrow == leftarrow
+        ygold = reverse(data[xpos,1:end-1])
+        append!(actions,map(x->goldacts[:moveleft],1:width))
+    elseif arrow == downarrow
+        ygold = data[xpos+1:end,width]
+        append!(actions,map(x->goldacts[:down],1:width))
+    elseif arrow == uparrow
+        ygold = data[xpos-1:1,width]
+        append!(actions,map(x->goldacts[:up],1:width))
+    else
+        error("ekranda kac cent var")
+    end    
+    return (data,ygold,actions)
+end
 
 function mul_data(seqlen)
     hi = parse("1"*"0"^seqlen) - 1
