@@ -24,8 +24,12 @@ type Game
                 xi2 = reshape(xi1, 1, length(xi1))
                 push!(xtapes, xi2)
             end
-        else
-            # do nothing for now
+        elseif in(task, ("add","mul","radd"))
+            for xi in x
+                push!(xtapes, make_grid(xi))
+            end
+        elseif task == "walk"
+            error("walk is not implemented yet")
         end
         # output tapes
 
@@ -37,7 +41,7 @@ type Game
 
         # pointer <=> head
         lens = map(xi->size(xi,2), x)
-        pointers = init_pointers(lens,N,task)
+        pointers = init_pointers(xtapes,N,task)
         symgold = [y...,-1]
         timestep = 1
 
@@ -47,8 +51,19 @@ type Game
     end
 end
 
-function init_pointers(lens, ninstances,task) # assume task is copy or reverse
-    map(i->[1,1], 1:ninstances)
+function init_pointers(grids,ninstances,task)
+    map(gi->get_origin(gi,task), grids)
+end
+
+function get_origin(grid,task)
+    if in(task, ("copy","reverse"))
+        return [1,1]
+    elseif in(task, ("add","mul","radd"))
+        return [1,size(grid,2)]
+    elseif task == "walk"
+        error("walk is not implemented yet")
+    end
+    error("invalid task")
 end
 
 # now only just for copy and reverse tasks
@@ -95,4 +110,18 @@ function make_output(g, s2i, a2i)
     y21 = map(yi->a2i[yi], y20)
 
     return y11, y21
+end
+
+function make_grid(x)
+    x = collect(x)
+    x = map(string, x)
+    x = sort(x, by=length, rev=true)
+    longest = length(x[1]); nelements = length(x)
+    grid = zeros(Int64, nelements, longest)
+    for (i,xi) in enumerate(x)
+        for k = 1:length(xi)
+            grid[i,end-length(xi)+k] = parse(Int64, xi[k])
+        end
+    end
+    return grid
 end
