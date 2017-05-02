@@ -50,7 +50,9 @@ function add_data(seqlen)
     low = parse("1"*"0"^(seqlen - 1))
     hi = parse("1"*"0"^seqlen) - 1
     n1 = rand(low:hi)
-    n2 = rand(0:hi)
+    num2len = rand(1:seqlen)
+    num2 = parse("1"*"0"^num2len)-1
+    n2 = rand(1:num2)
     data = (n1, n2)
     ygold = n1 + n2
     compound_move = Any[goldacts[:down], goldacts[:moveleft], goldacts[:up]]
