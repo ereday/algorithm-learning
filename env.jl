@@ -16,8 +16,20 @@ type Game
     function Game(x,y,actions,task="copy")
         N = length(x) # ninstances
 
-        # tapes
-        xtapes = x; ytapes = map(i->Any[], 1:N)
+        # input tapes
+        xtapes = []
+        if in(task, ("copy","reverse"))
+            for xi0 in x
+                xi1 = convert(Array{Int64}, xi0)
+                xi2 = reshape(xi1, 1, length(xi1))
+                push!(xtapes, xi2)
+            end
+        else
+            # do nothing for now
+        end
+        # output tapes
+
+        ytapes = map(i->Any[], 1:N)
 
         # actions
         xactions = map(ai->["<s>", ai...], actions)
@@ -42,14 +54,17 @@ end
 # now only just for copy and reverse tasks
 function move_timestep!(g,actions)
     for k = 1:g.ninstances
-        # info(actions)
         action = actions[k]
         if action == "mr"
-            g.pointers[k][1] += 1
+            g.pointers[k][2] += 1
         elseif action == "ml"
-            g.pointers[k][1] -= 1
+            g.pointers[k][2] -= 1
         elseif action == "<s>"
             # do nothing
+        elseif action == "up"
+            g.pointers[k][1] -= 1
+        elseif action == "down"
+            g.pointers[k][1] += 1
         else
             error("zaa xd $action")
         end
