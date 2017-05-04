@@ -88,7 +88,7 @@ function move_timestep!(g::Game, actions)
 end
 
 function move_timestep!(g::Game)
-    actions = map(i->g.next_actions[i][g.timestep], g.ninstances)
+    actions = map(ai->ai[g.timestep], g.next_actions)
     move_timestep!(g,actions)
 end
 

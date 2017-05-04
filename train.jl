@@ -17,7 +17,7 @@ function main(args)
         ("--seed"; default=-1; arg_type=Int64; help="random seed")
         ("--lr"; default=0.001)
         ("--units"; default=200)
-        ("--controller"; default="lstm"; help="feedforward")
+        ("--controller"; default="feedforward"; help="feedforward")
         ("--discount"; default=0.95)
         ("--start"; default=6; arg_type=Int64)
         ("--end"; default=50; arg_type=Int64)
@@ -90,9 +90,9 @@ function main(args)
     end
 end
 
-function train!(w,x1,y1,x2,y2,opts)
+function train!(w,x,y,h,c,opts)
     values = []
-    gloss = lossgradient(w,x1,y1,x2,y2; values=values)
+    gloss = lossgradient(w,x,y,h,c; values=values)
     update!(w, gloss, opts)
     return values[1]
 end
@@ -109,12 +109,13 @@ function validate(w,s2i,i2s,a2i,i2a,data,o)
 
         # seqlen = length(y[1])
         correctness = trues(length(batch))
+        h,c = initstates(o[:atype],o[:units],o[:batchsize],o[:controller])
         for k = 1:T
             x1,x2 = make_input(game, s2i, a2i)
             y1,y2 = make_output(game, s2i, a2i)
             x1 = convert(o[:atype], x1)
             x2 = convert(o[:atype], x2)
-            cout = propagate(w[:wcont],w[:bcont],vcat(x1,x2))
+            cout, h, c = propagate(w[:wcont],w[:bcont],vcat(x1,x2),h,c)
             y1pred = predict(w[:wsymb],w[:bsymb],cout)
             y2pred = predict(w[:wact],w[:bact],cout)
 

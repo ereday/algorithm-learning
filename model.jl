@@ -12,7 +12,7 @@ function lstm(weight, bias, input, hidden, cell)
 end
 
 function feedforward(w,b,x)
-    relu(w * x .+ w), nothing
+    return relu(w * x .+ w)
 end
 
 function propagate(w,b,x,h::Void,c::Void)
