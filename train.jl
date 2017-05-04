@@ -17,6 +17,7 @@ function main(args)
         ("--seed"; default=-1; arg_type=Int64; help="random seed")
         ("--lr"; default=0.001)
         ("--units"; default=200)
+        ("--controller"; default="lstm"; help="feedforward")
         ("--discount"; default=0.95)
         ("--start"; default=6; arg_type=Int64)
         ("--end"; default=50; arg_type=Int64)
@@ -57,21 +58,14 @@ function main(args)
             game = Game(x,y,actions)
             T = length(game.symgold[1])
 
-            batchloss = 0
-            for k = 1:T
-                # info("trn, timestep=$k")
-                x1,x2 = make_input(game, s2i, a2i)
-                y1,y2 = make_output(game, s2i, a2i)
-                x1 = convert(o[:atype], x1)
-                x2 = convert(o[:atype], x2)
-                this_loss = train!(w,x1,y1,x2,y2,opts)
-                batchloss += this_loss
+            inputs = make_inputs(game, s2i, a2i)
+            outputs = make_outputs(game, s2i, a2i)
+            timesteps = length(inputs)
+            batchsize = o[:batchsize]
+            h,c = initstates(o[:atype],o[:units],o[:batchsize],o[:controller])
+            batchloss = train!(w,inputs,outputs,h,c)
+            batchloss = batchloss / (batchsize * timesteps)
 
-                a0 = game.next_actions
-                a1 = map(ai->ai[game.timestep], a0)
-                move_timestep!(game,a1)
-            end
-            batchloss = batchloss / T
             if iter < 100
                 lossval = (iter-1)*lossval + batchloss
                 lossval = lossval / iter
@@ -86,6 +80,7 @@ function main(args)
                 info("(iter:$iter,acc:$acc)")
                 if acc > 0.98
                     info("$c converged in $iter iteration")
+                    Knet.gc(); gc()
                     break
                 end
             end
@@ -119,7 +114,7 @@ function validate(w,s2i,i2s,a2i,i2a,data,o)
             y1,y2 = make_output(game, s2i, a2i)
             x1 = convert(o[:atype], x1)
             x2 = convert(o[:atype], x2)
-            cout = propagate(w,vcat(x1,x2))
+            cout = propagate(w[:wcont],w[:bcont],vcat(x1,x2))
             y1pred = predict(w[:wsymb],w[:bsymb],cout)
             y2pred = predict(w[:wact],w[:bact],cout)
 

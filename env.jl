@@ -67,7 +67,7 @@ function get_origin(grid,task)
 end
 
 # now only just for copy and reverse tasks
-function move_timestep!(g,actions)
+function move_timestep!(g::Game, actions)
     for k = 1:g.ninstances
         action = actions[k]
         if action == "mr"
@@ -87,8 +87,15 @@ function move_timestep!(g,actions)
     g.timestep += 1
 end
 
-function make_input(g, s2i, a2i)
+function move_timestep!(g::Game)
+    actions = map(i->g.next_actions[i][g.timestep], g.ninstances)
+    move_timestep!(g,actions)
+end
+
+function make_input(g::Game, s2i, a2i)
     x1  = zeros(Float32, length(s2i), g.ninstances)
+
+    # x1 => onehots, x11 => values, x12 => decoded (actions)
     x11 = map(i->g.InputTapes[i][g.pointers[i]...], 1:g.ninstances)
     x12 = map(v->s2i[v], x11)
     for k = 1:length(x12); x1[x12[k],k] = 1; end
@@ -102,7 +109,18 @@ function make_input(g, s2i, a2i)
     return x1,x2
 end
 
-function make_output(g, s2i, a2i)
+function make_inputs(g::Game, s2i, a2i)
+    reset!(g)
+    inputs = []
+    for k = 1:length(g.prev_actions)
+        push!(inputs, make_input(g,s2i,a2i))
+        move_timestep!(g)
+    end
+    reset!(g)
+    return inputs
+end
+
+function make_output(g::Game, s2i, a2i)
     y10 = map(i->g.symgold[i][g.timestep], 1:g.ninstances)
     y11 = map(yi->s2i[yi], y10)
 
@@ -110,6 +128,17 @@ function make_output(g, s2i, a2i)
     y21 = map(yi->a2i[yi], y20)
 
     return y11, y21
+end
+
+function make_outputs(g, s2i, a2i)
+    reset!(g)
+    outputs = []
+    for k = 1:length(g.next_actions)
+        push!(outputs, make_output(g,s2i,a2i))
+        move_timestep!(g)
+    end
+    reset!(g)
+    return outputs
 end
 
 function make_grid(x)
@@ -124,4 +153,9 @@ function make_grid(x)
         end
     end
     return grid
+end
+
+function reset!(g::Game)
+    g.timestep = 1
+    g.pointers = init_pointers(g.InputTapes,g.ninstances,g.task)
 end
