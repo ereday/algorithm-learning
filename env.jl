@@ -112,7 +112,7 @@ end
 function make_inputs(g::Game, s2i, a2i)
     reset!(g)
     inputs = []
-    for k = 1:length(g.prev_actions)
+    for k = 1:length(g.prev_actions[1])-1
         push!(inputs, make_input(g,s2i,a2i))
         move_timestep!(g)
     end
@@ -133,7 +133,7 @@ end
 function make_outputs(g, s2i, a2i)
     reset!(g)
     outputs = []
-    for k = 1:length(g.next_actions)
+    for k = 1:length(g.next_actions[1])-1
         push!(outputs, make_output(g,s2i,a2i))
         move_timestep!(g)
     end

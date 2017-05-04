@@ -12,11 +12,11 @@ function lstm(weight, bias, input, hidden, cell)
 end
 
 function feedforward(w,b,x)
-    return relu(w * x .+ w)
+    return relu(w * x .+ b)
 end
 
 function propagate(w,b,x,h::Void,c::Void)
-    return feedforward(w,b,x), nothing, nothing
+    feedforward(w,b,x), nothing, nothing
 end
 
 function propagate(w,b,x,h,c)
@@ -24,14 +24,16 @@ function propagate(w,b,x,h,c)
     return h,h,c
 end
 
-predict(w,b,x) = w * x .+ b
+function predict(w,b,x)
+    return w * x .+ b
+end
 
 # x1,y1 => input/output for symbols
 # x2,y2 => input/output for actions
 # weighted loss for soft symbol/action distributions
 function loss(w,x,y,h,c; values=[])
-    batchsize = size(x1,2)
-    atype = AutoGrad.getval(typeof(w[:wcont]))
+    batchsize = size(x[1][1],2)
+    atype = typeof(AutoGrad.getval(w[:wcont]))
 
     lossval1 = lossval2 = 0
     for (xi,yi) in zip(x,y)
@@ -39,7 +41,7 @@ function loss(w,x,y,h,c; values=[])
         input = convert(atype,vcat(xi...)) # TODO: CPU/GPU comparison
 
         # use the controller
-        cout,h,c = propagate(w[:wcont],w[:bcont],input)
+        cout,h,c = propagate(w[:wcont],w[:bcont],input,h,c)
 
         # make predictions
         y1pred = predict(w[:wsymb],w[:bsymb],cout)
@@ -68,15 +70,17 @@ function logprob(output, ypred)
 end
 
 function initweights(
-    atype,units,nsymbols,nactions,controller="feed",dist="randn", winit=0.01)
+    atype,units,nsymbols,nactions,
+    controller="feedforward",dist="randn", winit=0.01)
     unit_dict = Dict("feed"=>1,"lstm"=>4)
     w = Dict()
     winit = (dist=="xavier") ? 1.0 : winit
     _dist = eval(Symbol(dist))
 
-    units = units * get(unit_dict,controller,1)
-    w[:wcont] = _dist(Float32, units, nsymbols+nactions)
-    w[:bcont] = zeros(Float32, units, 1)
+    params = units * get(unit_dict,controller,1)
+    input = nsymbols+nactions+(controller!="feedforward")*units
+    w[:wcont] = _dist(Float32, params, input)
+    w[:bcont] = zeros(Float32, params, 1)
     w[:wsymb] = _dist(Float32, nsymbols, units)
     w[:bsymb] = zeros(Float32, nsymbols, 1)
     w[:wact]  = _dist(Float32, nactions, units)

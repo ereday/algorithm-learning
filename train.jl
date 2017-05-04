@@ -40,17 +40,16 @@ function main(args)
     s2i, i2s = initvocab(SYMBOLS)
     a2i, i2a = initvocab(ACTIONS)
     w = initweights(
-        o[:atype],o[:units],length(s2i),length(a2i),o[:dist])
+        o[:atype],o[:units],length(s2i),length(a2i),o[:controller],o[:dist])
     opts = initopts(w)
 
-    for c = o[:start]:o[:step]:o[:end]
-        seqlen = div(c, complexities[o[:task]])
+    for C = o[:start]:o[:step]:o[:end]
+        seqlen = div(C, complexities[o[:task]])
         val = map(xi->data_generator(seqlen), [1:o[:nvalid]...])
         iter = 1
         lossval = 0
 
         while true
-        # for iter = 1:500 # for debug
             trn = map(xi->data_generator(seqlen), 1:o[:batchsize])
             x = map(xi->xi[1], trn)
             y = map(xi->xi[2], trn)
@@ -63,7 +62,7 @@ function main(args)
             timesteps = length(inputs)
             batchsize = o[:batchsize]
             h,c = initstates(o[:atype],o[:units],o[:batchsize],o[:controller])
-            batchloss = train!(w,inputs,outputs,h,c)
+            batchloss = train!(w,inputs,outputs,h,c,opts)
             batchloss = batchloss / (batchsize * timesteps)
 
             if iter < 100
@@ -75,12 +74,12 @@ function main(args)
 
             # perform the validation
             if iter % o[:period] == 0
-                info("batchloss:$batchloss")
+                println("batchloss:$batchloss")
                 acc = validate(w,s2i,i2s,a2i,i2a,val,o)
-                info("(iter:$iter,acc:$acc)")
+                println("(iter:$iter,acc:$acc)")
                 if acc > 0.98
-                    info("$c converged in $iter iteration")
-                    Knet.gc(); gc()
+                    println("$C converged in $iter iteration")
+                    # Knet.gc(); gc()
                     break
                 end
             end
