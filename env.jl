@@ -29,10 +29,13 @@ type Game
                 push!(xtapes, make_grid(xi))
             end
         elseif task == "walk"
-            error("walk is not implemented yet")
+            # error("walk is not implemented yet")
+            for xi in x
+                push!(xtapes, xi)
+            end
         end
-        # output tapes
 
+        # output tapes
         ytapes = map(i->Any[], 1:N)
 
         # actions
@@ -40,7 +43,6 @@ type Game
         yactions = map(ai->[ai..., "<s>"], actions)
 
         # pointer <=> head
-        lens = map(xi->size(xi,2), x)
         pointers = init_pointers(xtapes,N,task)
         symgold = [y...,-1]
         timestep = 1

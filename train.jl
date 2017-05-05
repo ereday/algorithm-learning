@@ -17,7 +17,7 @@ function main(args)
         ("--seed"; default=-1; arg_type=Int64; help="random seed")
         ("--lr"; default=0.001)
         ("--units"; default=200)
-        ("--controller"; default="feedforward"; help="feedforward")
+        ("--controller"; default="feedforward"; help="feedforward or lstm")
         ("--discount"; default=0.95)
         ("--start"; default=6; arg_type=Int64)
         ("--end"; default=50; arg_type=Int64)
@@ -27,7 +27,6 @@ function main(args)
         ("--atype"; default=(gpu()>=0 ? "KnetArray{Float32}" : "Array{Float32}"))
         ("--period"; default=100; arg_type=Int64)
         ("--dist";arg_type=String;default="randn";help="[randn|xavier]")
-        # ("--nsymbols"; default=11; arg_type=Int64)
     end
 
     isa(args, AbstractString) && (args=split(args))
@@ -43,6 +42,8 @@ function main(args)
         o[:atype],o[:units],length(s2i),length(a2i),o[:controller],o[:dist])
     opts = initopts(w)
 
+    # C => complexity
+    # c => controller cell
     for C = o[:start]:o[:step]:o[:end]
         seqlen = div(C, complexities[o[:task]])
         val = map(xi->data_generator(seqlen), [1:o[:nvalid]...])
@@ -54,7 +55,7 @@ function main(args)
             x = map(xi->xi[1], trn)
             y = map(xi->xi[2], trn)
             actions = map(xi->xi[3], trn)
-            game = Game(x,y,actions)
+            game = Game(x,y,actions,o[:task])
             T = length(game.symgold[1])
 
             inputs = make_inputs(game, s2i, a2i)
