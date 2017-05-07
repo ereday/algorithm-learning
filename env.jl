@@ -44,7 +44,7 @@ type Game
 
         # pointer <=> head
         pointers = init_pointers(xtapes,N,task)
-        symgold = [y...,-1]
+        symgold = map(i->get_symgold(x[i],y[i],actions[i],task), 1:N)
         timestep = 1
 
         new(
@@ -63,9 +63,11 @@ function get_origin(grid,task)
     elseif in(task, ("add","mul","radd"))
         return [1,size(grid,2)]
     elseif task == "walk"
-        error("walk is not implemented yet")
+        lastcol = grid[:,end]
+        i = findfirst(x->x<0, lastcol)
+        return [i,1]
     end
-    error("invalid task")
+    error("invalid task: $task")
 end
 
 # now only just for copy and reverse tasks
@@ -143,10 +145,13 @@ function make_outputs(g, s2i, a2i)
     return outputs
 end
 
-function make_grid(x)
+function make_grid()
     x = collect(x)
     x = map(string, x)
-    x = sort(x, by=length, rev=true)
+
+    # do we need sorting?
+    # x = sort(x, by=length, rev=true)
+
     longest = length(x[1]); nelements = length(x)
     grid = zeros(Int64, nelements, longest)
     for (i,xi) in enumerate(x)
@@ -160,4 +165,19 @@ end
 function reset!(g::Game)
     g.timestep = 1
     g.pointers = init_pointers(g.InputTapes,g.ninstances,g.task)
+end
+
+# x: input tape, y: output tape, a: actions
+function get_symgold(x,y,a,task)
+    if in(task, ("copy","reverse"))
+        return [y..., -1]
+    elseif task == "walk"
+        return [map(i->-1, 1:size(x,2)-1), y...]
+    elseif task == "add"
+        # nothing yet
+    elseif task == "mul"
+        # nothing yet
+    else
+        error("$task is not implemented yet")
+    end
 end

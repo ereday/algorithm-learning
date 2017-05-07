@@ -78,10 +78,10 @@ function add_data(seqlen)
     return (data, ygold, actions)
 end
 
-function walk_data(seqlen) 
-    downarrow = -1
+function walk_data(seqlen)
     leftarrow = -2
-    uparrow   = -3
+    downarrow = -3
+    uparrow   = -4
     width = Int(seqlen/2)
     if rand() < 0.5
         xpos = 1
@@ -105,7 +105,7 @@ function walk_data(seqlen)
         append!(actions,map(x->goldacts[:up],1:width))
     else
         error("ekranda kac cent var")
-    end    
+    end
     return (data,ygold,actions)
 end
 

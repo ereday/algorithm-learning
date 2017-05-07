@@ -36,7 +36,7 @@ function main(args)
     data_generator = get_data_generator(o[:task])
 
     # init model, params etc.
-    s2i, i2s = initvocab(SYMBOLS)
+    s2i, i2s = initvocab(get_symbols(o[:task]))
     a2i, i2a = initvocab(ACTIONS)
     w = initweights(
         o[:atype],o[:units],length(s2i),length(a2i),o[:controller],o[:dist])
