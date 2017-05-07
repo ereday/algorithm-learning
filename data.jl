@@ -13,6 +13,12 @@ const goldacts = Dict{Symbol, AbstractString}(:moveright=>"mr",
                                               :down=>"down")
 const no_op = -1
 
+# walk data
+const LEFT = -4
+const DOWN = -3
+const UP = -2
+const ARROWS = Dict{Int64,Symbol}(LEFT => :moveleft, DOWN => :down, UP => :up)
+
 """
 experiment is a string given as lowercase name
 """
@@ -27,8 +33,8 @@ end
 
 
 function copy_data(seqlen)
-    data = Any[ rand(0:9) for i=1:seqlen ]
-    actions = [ goldacts[:moveright] for i =1:seqlen ] # to do decide the last item
+    data = Any[rand(0:9) for i=1:seqlen]
+    actions = [goldacts[:moveright] for i =1:seqlen]
     ygold = data
     return (data, ygold, actions) # x,y,actions
 end
@@ -36,11 +42,10 @@ end
 
 function reverse_data(seqlen)
     data = Any[ rand(0:9) for i=1:seqlen ]
-    ygold = Any[ no_op for i=1:seqlen+1 ]
-    append!(ygold, reverse(data))
+    ygold = reverse(data)
     push!(data, -2)
-    actions = [ goldacts[:moveright] for i=1:seqlen ]
-    actions2 = [ goldacts[:moveleft] for i=1:seqlen+1 ]
+    actions = [goldacts[:moveright] for i=1:seqlen]
+    actions2 = [goldacts[:moveleft] for i=1:seqlen+1]
     acts = append!(actions, actions2)
     return (data, ygold, actions)
 end
@@ -79,34 +84,35 @@ function add_data(seqlen)
 end
 
 function walk_data(seqlen)
-    leftarrow = -2
-    downarrow = -3
-    uparrow   = -4
+    direction = rand(-4:-2) # left, down, up
     width = Int(seqlen/2)
-    if rand() < 0.5
-        xpos = 1
-        arrow = (rand() < 0.5 )? downarrow : leftarrow
-    else
-        xpos = width # height
-        arrow = (rand() < 0.5) ? uparrow : leftarrow
-    end
-    data = rand(1:9,width,width)
-    data[xpos,width] = arrow
+    grid = rand(0:9, width, width)
 
-    actions = map(x->goldacts[:moveright],1:width-1)
-    if arrow == leftarrow
-        ygold = reverse(data[xpos,1:end-1])
-        append!(actions,map(x->goldacts[:moveleft],1:width))
-    elseif arrow == downarrow
-        ygold = data[xpos+1:end,width]
-        append!(actions,map(x->goldacts[:down],1:width))
-    elseif arrow == uparrow
-        ygold = data[xpos-1:1,width]
-        append!(actions,map(x->goldacts[:up],1:width))
+    mainrow = hcat(rand(0:9, 1, width-1), [direction])
+    rowind = -1
+    if direction == UP
+        rowind = width
+    elseif direction == DOWN
+        rowind = 1
     else
-        error("ekranda kac cent var")
+        rowind = rand(1:width)
     end
-    return (data,ygold,actions)
+    grid[rowind,:] = mainrow
+    actions = vcat(
+        map(x -> goldacts[:moveright], 1:width-1),
+        map(x -> goldacts[ARROWS[direction]], 1:width))
+
+    ygold = nothing
+    if direction == UP
+        ygold = grid[1:end-1,end]
+    elseif direction == DOWN
+        ygold = grid[2:end,end]
+    else
+        ygold = grid[rowind,1:end-1]
+    end
+    ygold = reverse(ygold)
+
+    return (grid,ygold,actions)
 end
 
 function mul_data(seqlen)

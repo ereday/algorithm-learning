@@ -169,10 +169,12 @@ end
 
 # x: input tape, y: output tape, a: actions
 function get_symgold(x,y,a,task)
-    if in(task, ("copy","reverse"))
+    if task == "copy"
         return [y..., -1]
+    elseif task == "reverse"
+        return [map(yi->-1, y)..., y..., -1]
     elseif task == "walk"
-        return [map(i->-1, 1:size(x,2)-1), y...]
+        return [map(i->-1, 1:size(x,2)-1)..., y..., -1]
     elseif task == "add"
         # nothing yet
     elseif task == "mul"

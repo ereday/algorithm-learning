@@ -24,14 +24,14 @@ function main(args)
         ("--step"; default=4; arg_type=Int64)
         ("--batchsize"; default=20; arg_type=Int64)
         ("--nvalid"; default=60; arg_type=Int64)
-        ("--atype"; default=(gpu()>=0 ? "KnetArray{Float32}" : "Array{Float32}"))
+        ("--atype"; default=(gpu()>=0 ? "KnetArray{Float32}":"Array{Float32}"))
         ("--period"; default=100; arg_type=Int64)
         ("--dist";arg_type=String;default="randn";help="[randn|xavier]")
     end
 
     isa(args, AbstractString) && (args=split(args))
     o = parse_args(args, s; as_symbols=true); println(o); flush(STDOUT)
-    s = o[:seed] > 0 ? srand(o[:seed]) : srand()
+    sr = o[:seed] > 0 ? srand(o[:seed]) : srand()
     o[:atype] = eval(parse(o[:atype]))
     data_generator = get_data_generator(o[:task])
 
