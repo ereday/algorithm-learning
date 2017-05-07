@@ -14,9 +14,9 @@ const goldacts = Dict{Symbol, AbstractString}(:moveright=>"mr",
 const no_op = -1
 
 # walk data
-const LEFT = -4
+const LEFT = -2
 const DOWN = -3
-const UP = -2
+const UP = -4
 const ARROWS = Dict{Int64,Symbol}(LEFT => :moveleft, DOWN => :down, UP => :up)
 
 """
@@ -43,7 +43,7 @@ end
 function reverse_data(seqlen)
     data = Any[ rand(0:9) for i=1:seqlen ]
     ygold = reverse(data)
-    push!(data, -2)
+    push!(data, LEFT)
     actions = [goldacts[:moveright] for i=1:seqlen]
     actions2 = [goldacts[:moveleft] for i=1:seqlen+1]
     acts = append!(actions, actions2)
@@ -84,7 +84,7 @@ function add_data(seqlen)
 end
 
 function walk_data(seqlen)
-    direction = rand(-4:-2) # left, down, up
+    direction = rand(-4:-2) # down, up, left
     width = Int(seqlen/2)
     grid = rand(0:9, width, width)
 

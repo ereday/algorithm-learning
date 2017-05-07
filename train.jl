@@ -105,9 +105,8 @@ function validate(w,s2i,i2s,a2i,i2a,data,o)
         y = map(xi->xi[2], batch)
         actions = map(xi->xi[3], batch)
         game = Game(x,y,actions)
-        T = length(game.symgold[1])
+        T = length(game.next_actions[1])
 
-        # seqlen = length(y[1])
         correctness = trues(length(batch))
         h,c = initstates(o[:atype],o[:units],o[:batchsize],o[:controller])
         for k = 1:T
@@ -119,7 +118,6 @@ function validate(w,s2i,i2s,a2i,i2a,data,o)
             y1pred = predict(w[:wsymb],w[:bsymb],cout)
             y2pred = predict(w[:wact],w[:bact],cout)
 
-            # ypred = predict(w,input) # (K
             y1pred = convert(Array, y1pred)
             y1pred = mapslices(indmax,y1pred,1)
             y1pred = map(yi->i2s[yi], y1pred)
@@ -130,7 +128,7 @@ function validate(w,s2i,i2s,a2i,i2a,data,o)
 
             # check correctness
             for i = 1:length(y1pred)
-                if y1pred[i] != y[i][k]
+                if y1pred[i] != game.symgold[i][k]
                     correctness[i] = false
                 end
             end

@@ -100,7 +100,7 @@ function make_input(g::Game, s2i, a2i)
     x1  = zeros(Float32, length(s2i), g.ninstances)
 
     # x1 => onehots, x11 => values, x12 => decoded (actions)
-    x11 = map(i->g.InputTapes[i][g.pointers[i]...], 1:g.ninstances)
+    x11 = map(i->read_symbol(g.InputTapes[i],g.pointers[i]), 1:g.ninstances)
     x12 = map(v->s2i[v], x11)
     for k = 1:length(x12); x1[x12[k],k] = 1; end
 
@@ -148,10 +148,6 @@ end
 function make_grid()
     x = collect(x)
     x = map(string, x)
-
-    # do we need sorting?
-    # x = sort(x, by=length, rev=true)
-
     longest = length(x[1]); nelements = length(x)
     grid = zeros(Int64, nelements, longest)
     for (i,xi) in enumerate(x)
@@ -174,7 +170,7 @@ function get_symgold(x,y,a,task)
     elseif task == "reverse"
         return [map(yi->-1, y)..., y..., -1]
     elseif task == "walk"
-        return [map(i->-1, 1:size(x,2)-1)..., y..., -1]
+        return [map(i->-1, 1:size(x,2))..., y..., -1]
     elseif task == "add"
         # nothing yet
     elseif task == "mul"
@@ -182,4 +178,11 @@ function get_symgold(x,y,a,task)
     else
         error("$task is not implemented yet")
     end
+end
+
+function read_symbol(grid, pointer)
+    if 0 < pointer[1] < size(grid,1) && 0 < pointer[2] < size(grid,2)
+        return grid[pointer...]
+    end
+    return -1
 end

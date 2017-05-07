@@ -1,7 +1,7 @@
 const COPY_SYMBOLS = (-1:9...)
 const REVERSE_SYMBOLS = (-2:9...)
 const WALK_SYMBOLS = (-4:9...)
-const SYMBOLS = (-2:9...)
+const SYMBOLS = (-1:9...)
 
 function get_symbols(task)
     if in(task,("copy","reverse","walk"))
