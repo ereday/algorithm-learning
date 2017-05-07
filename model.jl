@@ -11,6 +11,19 @@ function lstm(weight, bias, input, hidden, cell)
     return (hidden,cell)
 end
 
+#w1 -> (2H, X+H) #b1   -> (2H,1)
+#w2 -> (2H, X+H) #b2   -> (2H,1)
+#reference: https://goo.gl/6uDnrk
+function gru(w1,w2,b1,b2,input,hidden)
+    gates  = w1 * vcat(hidden,input) .+ b1
+    hsize  = size(hidden,1)
+    update = sigm(gates[1:hsize,:])
+    reset  = sigm(gates[1+hsize:end,:])
+    h      = w2 * vcat(hidden .* reset,input) .+ b2
+    hidden = (1 .- update) + (update .* hidden)
+    return hidden
+end
+
 function feedforward(w,b,x)
     return relu(w * x .+ b)
 end
