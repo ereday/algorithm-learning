@@ -104,13 +104,12 @@ function walk_data(seqlen)
 
     ygold = nothing
     if direction == UP
-        ygold = grid[1:end-1,end]
+        ygold = reverse(grid[1:end-1,end])
     elseif direction == DOWN
         ygold = grid[2:end,end]
     else
-        ygold = grid[rowind,1:end-1]
+        ygold = reverse(grid[rowind,1:end-1])
     end
-    ygold = reverse(ygold)
 
     return (grid,ygold,actions)
 end
