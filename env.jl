@@ -181,7 +181,7 @@ function get_symgold(x,y,a,task)
 end
 
 function read_symbol(grid, pointer)
-    if 0 < pointer[1] < size(grid,1) && 0 < pointer[2] < size(grid,2)
+    if 0 < pointer[1] <= size(grid,1) && 0 < pointer[2] <= size(grid,2)
         return grid[pointer...]
     end
     return -1

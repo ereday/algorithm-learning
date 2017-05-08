@@ -84,7 +84,6 @@ function main(args)
                     break
                 end
             end
-
             iter += 1
         end
     end
@@ -104,7 +103,7 @@ function validate(w,s2i,i2s,a2i,i2a,data,o)
         x = map(xi->xi[1], batch)
         y = map(xi->xi[2], batch)
         actions = map(xi->xi[3], batch)
-        game = Game(x,y,actions)
+        game = Game(x,y,actions,o[:task])
         T = length(game.next_actions[1])
 
         correctness = trues(length(batch))
