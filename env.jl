@@ -3,8 +3,9 @@ const ACTIONS = ("mr","ml","up","down", "<s>")
 
 type Game
     ninstances
-    InputTapes
-    OutputTapes
+    input_tapes
+    output_tapes
+    gold_tapes
     next_actions
     prev_actions
     task
@@ -38,17 +39,29 @@ type Game
         # output tapes
         ytapes = map(i->Any[], 1:N)
 
+        # gold tapes
+        gtapes = []
+        if in(task, ("copy","reverse","walk"))
+            for yi in y
+                push!(gtapes, yi)
+            end
+        else
+            for yi in y
+                push!(gtapes, digits(yi))
+            end
+        end
+
         # actions
         xactions = map(ai->["<s>", ai...], actions)
         yactions = map(ai->[ai..., "<s>"], actions)
 
         # pointer <=> head
         pointers = init_pointers(xtapes,N,task)
-        symgold = map(i->get_symgold(x[i],y[i],actions[i],task), 1:N)
+        symgold = map(i->get_symgold(xtapes[i],gtapes[i],actions[i],task), 1:N)
         timestep = 1
 
         new(
-            N,xtapes,ytapes,yactions,xactions,
+            N,xtapes,ytapes,gtapes,yactions,xactions,
             task,pointers,symgold,timestep)
     end
 end
@@ -100,7 +113,7 @@ function make_input(g::Game, s2i, a2i)
     x1  = zeros(Float32, length(s2i), g.ninstances)
 
     # x1 => onehots, x11 => values, x12 => decoded (actions)
-    x11 = map(i->read_symbol(g.InputTapes[i],g.pointers[i]), 1:g.ninstances)
+    x11 = map(i->read_symbol(g.input_tapes[i],g.pointers[i]), 1:g.ninstances)
     x12 = map(v->s2i[v], x11)
     for k = 1:length(x12); x1[x12[k],k] = 1; end
 
@@ -160,7 +173,7 @@ end
 
 function reset!(g::Game)
     g.timestep = 1
-    g.pointers = init_pointers(g.InputTapes,g.ninstances,g.task)
+    g.pointers = init_pointers(g.input_tapes,g.ninstances,g.task)
 end
 
 # x: input tape, y: output tape, a: actions
@@ -172,10 +185,10 @@ function get_symgold(x,y,a,task)
     elseif task == "walk"
         return [map(i->-1, 1:size(x,2))..., y..., -1]
     elseif task == "add"
-        # return [mapreduce(i->, 1:2*length())..., -1, -1]
-        # nothing yet
-    elseif task == "mul"
-        # nothing yet
+        x1digits = size(x,2)
+        y1digits = length(y)
+        symgold = mapreduce(i->[-1,y[i]], vcat, 1:x1digits)
+        return vcat(symgold, [-1, (y1digits>x1digits?y[end]:-1)])
     else
         error("$task is not implemented yet")
     end
