@@ -145,11 +145,11 @@ function make_outputs(g, s2i, a2i)
     return outputs
 end
 
-function make_grid()
+function make_grid(x)
     x = collect(x)
     x = map(string, x)
     longest = length(x[1]); nelements = length(x)
-    grid = zeros(Int64, nelements, longest)
+    grid = -ones(Int64, nelements, longest)
     for (i,xi) in enumerate(x)
         for k = 1:length(xi)
             grid[i,end-length(xi)+k] = parse(Int64, xi[k])
@@ -172,6 +172,7 @@ function get_symgold(x,y,a,task)
     elseif task == "walk"
         return [map(i->-1, 1:size(x,2))..., y..., -1]
     elseif task == "add"
+        # return [mapreduce(i->, 1:2*length())..., -1, -1]
         # nothing yet
     elseif task == "mul"
         # nothing yet
