@@ -253,6 +253,10 @@ function length(obj::ReplayMemory)
     return length(obj.memory)
 end
 
+function empty!(obj::ReplayMemory)
+    empty!(obj.memory)
+end
+
 function sample(obj::ReplayMemory, batchsize, nsteps=20)
     batchsize = min(length(obj), batchsize)
     indices = randperm(length(obj))[1:batchsize]
@@ -272,7 +276,7 @@ end
 
 # currently I don't have an efficient idea to run episodes parallel
 # I just leave it in this way for simplicity
-function run_episodes(
+function run_episodes!(
     g::Game, mem, w, h, c, s2i, i2s, a2i, i2a, steps_done; o=Dict())
     reset!(g)
     atype = typeof(w[:wcont])
@@ -302,7 +306,7 @@ function run_episodes(
             action = i2a[action]
 
             # decide reward, termination, remaining steps
-            reward, done, nsteps = get_reward(g)
+            reward, done, nsteps = get_reward(g, i, predicted)
 
             # transition
             this_transition = Transition(
@@ -310,8 +314,8 @@ function run_episodes(
                 input_symbol,
                 input_action,
                 nsteps,
-                h,
-                c,
+                h != nothing ? Array(h) : nothing,
+                c != nothing ? Array(c) : nothing,
                 predicted[end], # output_symbol
                 action)
 
@@ -321,13 +325,16 @@ function run_episodes(
             # change controller state
             h = h1; c = c1
 
-            # when to do steps_done increament?
-            # after each episode or after each step?
-
             # if done, then break
             done && break
         end
+
+        # FIXME: when to do steps_done increament?
+        # after each episode or after each step?
+        steps_done += 1
     end
+
+    return steps_done
 end
 
 function take_action(w, b, s, steps_done; o=Dict())
@@ -347,6 +354,19 @@ function take_action(w, b, s, steps_done; o=Dict())
     end
 end
 
-function get_reward(g::Game)
-    error("nothing yet")
+function get_reward(g::Game, instance, predictions)
+    symgold = g.symgold[instance]
+    symgold = filter(si->si!=NO_SYMBOL, symgold)
+    predictions = filter(pi->pi!=NO_SYMBOL, predictions)
+
+    reward = 0
+    done = false
+    nsteps = length(symgold) - length(predictions)
+    if predictions == symgold[1:length(predictions)]
+        reward = 1
+    else
+        done = true
+    end
+
+    return reward, done, nsteps
 end

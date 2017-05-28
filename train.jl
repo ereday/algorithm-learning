@@ -7,6 +7,8 @@ include("model.jl")
 include("data.jl")
 include("vocab.jl")
 
+const CAPACITY = 50000
+
 function main(args)
     s = ArgParseSettings()
     s.description = ""
@@ -26,7 +28,9 @@ function main(args)
         ("--nvalid"; default=60; arg_type=Int64)
         ("--atype"; default=(gpu()>=0 ? "KnetArray{Float32}":"Array{Float32}"))
         ("--period"; default=100; arg_type=Int64)
-        ("--dist";arg_type=String;default="randn";help="[randn|xavier]")
+        ("--dist"; arg_type=String; default="randn"; help="[randn|xavier]")
+        ("--supervised"; action=:store_true; help="if not, q-learning")
+        ("--capacity"; default=CAPACITY; arg_type=Int64)
     end
 
     isa(args, AbstractString) && (args=split(args))
@@ -35,19 +39,34 @@ function main(args)
     o[:atype] = eval(parse(o[:atype]))
     data_generator = get_data_generator(o[:task])
 
+    if o[:loadfile] != nothing
+
+    end
+
     # init model, params etc.
-    s2i, i2s = initvocab(get_symbols(o[:task]))
+    w = opts = s2i = i2s = nothing
     a2i, i2a = initvocab(ACTIONS)
-    w = initweights(
-        o[:atype],o[:units],length(s2i),length(a2i),o[:controller],o[:dist])
-    opts = initopts(w)
+    if o[:loadfile] == nothing
+        s2i, i2s = initvocab(get_symbols(o[:task]))
+        w = initweights(
+            o[:atype],o[:units],length(s2i),length(a2i),o[:controller],o[:dist])
+        opts = initopts(w)
+    else
+        o[:task] = load(o[:loadfile], "task")
+        w = load(o[:loadfile], "w")
+        # opts - not yet!
+        # opts = load(o[:loadfile])
+        o[:start] = load(o[:loadfile], "complexity")
+        s2i, i2s = initvocab(get_symbols(o[:task]))
+    end
+    mem = ReplayMemory(o[:capacity])
 
     # C => complexity
     # c => controller cell
     for C = o[:start]:o[:step]:o[:end]
         seqlen = div(C, complexities[o[:task]])
         val = map(xi->data_generator(seqlen), [1:o[:nvalid]...])
-        iter = 1
+        iter = 0
         lossval = 0
 
         while true
@@ -58,18 +77,30 @@ function main(args)
             game = Game(x,y,actions,o[:task])
             T = length(game.symgold[1])
 
-            inputs = make_inputs(game, s2i, a2i)
-            outputs = make_outputs(game, s2i, a2i)
-            timesteps = length(inputs)
-            batchsize = o[:batchsize]
-            h,c = initstates(o[:atype],o[:units],o[:batchsize],o[:controller])
-            batchloss = train!(w,inputs,outputs,h,c,opts)
-            batchloss = batchloss / (batchsize * timesteps)
+            h,c = initstates(
+                o[:atype],o[:units],o[:batchsize],o[:controller])
 
-            # rl train
-            reset!(game)
-            T = length(game.symgold[1])
+            if o[:supervised]
+                inputs = make_inputs(game, s2i, a2i)
+                outputs = make_outputs(game, s2i, a2i)
+                timesteps = length(inputs)
+                batchsize = o[:batchsize]
+                batchloss = train!(w,inputs,outputs,h,c,opts)
+                batchloss = batchloss / (batchsize * timesteps)
+                iter += 1
+            else # rl train
+                # run new episodes
+                run_episodes!(
+                    g, mem, w, h, c, s2i, i2s, a2i, i2a, steps_done; o=o)
 
+                # train with batches from memory
+                for k = 1:o[:period]
+                    iter += 1
+                    error("nothing yet")
+                end
+            end
+
+            # running means
             if iter < 100
                 lossval = (iter-1)*lossval + batchloss
                 lossval = lossval / iter
@@ -84,11 +115,21 @@ function main(args)
                 println("(iter:$iter,acc:$acc)")
                 if acc > 0.98
                     println("$C converged in $iter iteration")
-                    # Knet.gc(); gc()
+                    # Knet.gc(); gc(); Knet.gc()
+
+                    # save model
+                    save(o[:savefile],
+                         "w", map(Array, w),
+                         # need something like above for opts
+                         # "opts", opts,
+                         "task", o[:task],
+                         "complexity", C)
+
                     break
                 end
             end
-            iter += 1
+
+            !o[:supervised] && empty!(mem)
         end
     end
 end
