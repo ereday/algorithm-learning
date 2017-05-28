@@ -7,4 +7,4 @@ Reimplementation of Learning Simple Algorithms From Examples paper on Julia
 - ~~GRU controller~~
 - Model save
 - Visualization/demo
-- Q-learning
+- Q-learning (work in progress)
