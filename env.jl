@@ -1,3 +1,6 @@
+import Base: push!
+import Base: length
+
 const ACTIONS = ("mr","ml","up","down", "<s>")
 # <s> token stands for start in input, stop in output
 
@@ -199,4 +202,54 @@ function read_symbol(grid, pointer)
         return grid[pointer...]
     end
     return -1
+end
+
+# Environment for Reinforcement Learning
+type Transition
+    # +1 for true symbol output, 0 for otherwise
+    reward
+
+    # environment state - POMDP
+    read_symbol
+    prev_action
+    nsteps # remaining steps
+
+    # controller state - e.g. RNN hidden/cell
+    state
+
+    # next environment state
+    write_symbol
+    next_action
+end
+
+type ReplayMemory
+    capacity
+    memory
+
+    function ReplayMemory(capacity)
+        memory = Transition[]
+        new(capacity, memory)
+    end
+end
+
+function push!(obj::ReplayMemory, t::Transition)
+    push!(obj.memory, t)
+    length(obj.memory) > obj.capacity && shift!(obj.memory)
+end
+
+function length(obj::ReplayMemory)
+    return length(obj.memory)
+end
+
+function sample(obj::ReplayMemory, batchsize, nsteps=20)
+    batchsize = min(length(obj), batchsize)
+    indices = randperm(length(obj))[1:batchsize]
+
+    # nsteps q-learning
+    samples = []
+    for ind in indices
+        push!(samples, obj.memory[ind:min(ind+nsteps-1),length(obj)])
+    end
+
+    return samples
 end
