@@ -66,6 +66,10 @@ function main(args)
             batchloss = train!(w,inputs,outputs,h,c,opts)
             batchloss = batchloss / (batchsize * timesteps)
 
+            # rl train
+            reset!(game)
+            T = length(game.symgold[1])
+
             if iter < 100
                 lossval = (iter-1)*lossval + batchloss
                 lossval = lossval / iter

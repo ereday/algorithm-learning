@@ -1,5 +1,6 @@
 import Base: push!
 import Base: length
+import Base: empty!
 
 const ACTIONS = ("mr","ml","up","down", "<s>")
 # <s> token stands for start in input, stop in output
@@ -15,6 +16,7 @@ type Game
     pointers
     symgold
     timestep
+    # terminated
     # mask
 
     function Game(x,y,actions,task="copy")
@@ -62,10 +64,14 @@ type Game
         pointers = init_pointers(xtapes,N,task)
         symgold = map(i->get_symgold(xtapes[i],gtapes[i],actions[i],task), 1:N)
         timestep = 1
+        # terminated = falses(N)
 
         new(
             N,xtapes,ytapes,gtapes,yactions,xactions,
             task,pointers,symgold,timestep)
+    end
+
+    function Game(w,x,y)
     end
 end
 
@@ -87,22 +93,10 @@ function get_origin(grid,task)
 end
 
 # now only just for copy and reverse tasks
-function move_timestep!(g::Game, actions)
+function move_timestep!(g::Game, actions::Array)
     for k = 1:g.ninstances
         action = actions[k]
-        if action == "mr"
-            g.pointers[k][2] += 1
-        elseif action == "ml"
-            g.pointers[k][2] -= 1
-        elseif action == "<s>"
-            # do nothing
-        elseif action == "up"
-            g.pointers[k][1] -= 1
-        elseif action == "down"
-            g.pointers[k][1] += 1
-        else
-            error("zaa xd $action")
-        end
+        move_timestep!(g, k, action)
     end
     g.timestep += 1
 end
@@ -110,6 +104,23 @@ end
 function move_timestep!(g::Game)
     actions = map(ai->ai[g.timestep], g.next_actions)
     move_timestep!(g,actions)
+end
+
+function move_timestep!(g::Game, instance::Int64, action)
+    k = instance
+    if action == "mr"
+        g.pointers[k][2] += 1
+    elseif action == "ml"
+        g.pointers[k][2] -= 1
+    elseif action == "<s>"
+        # do nothing
+    elseif action == "up"
+        g.pointers[k][1] -= 1
+    elseif action == "down"
+        g.pointers[k][1] += 1
+    else
+        error("invalid action: $action")
+    end
 end
 
 function make_input(g::Game, s2i, a2i)
@@ -210,16 +221,17 @@ type Transition
     reward
 
     # environment state - POMDP
-    read_symbol
-    prev_action
+    input_symbol
+    input_action
     nsteps # remaining steps
 
     # controller state - e.g. RNN hidden/cell
-    state
+    h
+    c
 
     # next environment state
-    write_symbol
-    next_action
+    output_symbol
+    output_action
 end
 
 type ReplayMemory
@@ -252,4 +264,89 @@ function sample(obj::ReplayMemory, batchsize, nsteps=20)
     end
 
     return samples
+end
+
+function sample_action()
+    error("not implemented yet")
+end
+
+# currently I don't have an efficient idea to run episodes parallel
+# I just leave it in this way for simplicity
+function run_episodes(
+    g::Game, mem, w, h, c, s2i, i2s, a2i, i2a, steps_done; o=Dict())
+    reset!(g)
+    atype = typeof(w[:wcont])
+
+    for k = 1:g.ninstances
+        input_action = g.prev_actions[k][1] # no action input
+        input_symbol = read_symbol(g.input_tapes[k], g.pointers[k])
+        predicted = []
+
+        while true
+            # make one-hot input vector
+            input = zeros(1, length(s2i)+length(a2i))
+            input[input_symbol] = 1
+            input[length(s2i)+input_action] = 1
+            input = convert(atype, input)
+
+            # use controller
+            cout, h1, c1 = propagate(w[:wcont], w[:bcont], input, h, c)
+
+            # predict symbol
+            y1pred = predict(w[:wsymb],w[:bsymb], cout)
+            y1pred = indmax(Array(y1pred))
+            push!(predicted, i2s[y1pred])
+
+            # take action
+            action = take_action(w[:wact],w[:bact],cout,steps_done; o=o)
+            action = i2a[action]
+
+            # decide reward, termination, remaining steps
+            reward, done, nsteps = get_reward(g)
+
+            # transition
+            this_transition = Transition(
+                reward,
+                input_symbol,
+                input_action,
+                nsteps,
+                h,
+                c,
+                predicted[end], # output_symbol
+                action)
+
+            # push to replay memory
+            push!(mem, this_transition)
+
+            # change controller state
+            h = h1; c = c1
+
+            # when to do steps_done increament?
+            # after each episode or after each step?
+
+            # if done, then break
+            done && break
+        end
+    end
+end
+
+function take_action(w, b, s, steps_done; o=Dict())
+    ei = get(o, :epsinit,  EPS_INIT)
+    ef = get(o, :epsfinal, EPS_FINAL)
+    ed = get(o, :epsdecay, EPS_DECAY)
+    et = ef + (ei-ef) * exp(-steps_done/ed)
+
+    if rand() > et
+        # @show w,s
+        s = reshape(s,length(s),1)
+        y = predict(w,b,s)
+        y = Array(y)
+        return indmax(y)
+    else
+        return rand(1:2)
+    end
+end
+
+function get_reward(g::Game)
+    error("nothing yet")
 end
