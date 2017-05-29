@@ -142,6 +142,13 @@ function sltrain!(w,x,y,h,c,opts)
     return values[1]
 end
 
+function rltrain!(w,targets,x,y,a,h,c,opts)
+    values = []
+    gloss = rlgradient(w,targets,x,y,a,h,c; values=values)
+    update!(w, gloss, opts)
+    return values[1]
+end
+
 function validate(w,s2i,i2s,a2i,i2a,data,o)
     batches = map(i->data[i:i+o[:batchsize]-1], [1:o[:batchsize]:length(data)...])
     ncorrect = 0

@@ -133,7 +133,7 @@ function rloss(w, targets, xs, ys, as, h, c; values=[])
 
     # compute indices
     nrows, ncols = size(qsa)
-    index = actions + nrows*(0:(length(actions)-1))
+    index = as + nrows*(0:(length(as)-1))
 
     # compute estimate
     qs = qsa[index]
@@ -151,6 +151,91 @@ end
 rlgradient = grad(rloss)
 
 # compute TD targets for objective
-function compute_targets(samples, wfix, discount)
-    error("nothing yet")
+function compute_targets(samples, w, discount, nsteps, s2i, a2i)
+    # reward calculations
+    discounts = map(i->discount^i, 0:nsteps)
+    targets = zeros(1, length(samples))
+    for k = 1:length(samples)
+        sample = samples[k]
+        vs, vsp = samples[k][1].nsteps, samples[k][end].nsteps
+        reward = mapreduce(
+            i->(sample[i].reward)*discounts[i]/vs, +, 1:length(sample))
+        targets[k] = reward
+    end
+
+    # (1) dynamic discount calculation for max Q(s,a)
+    get_steps(s) = (s[1].nsteps, s[end].nsteps)
+    gamma = discounts[end]
+    discounts = map(i->get_steps(samples[i]), 1:length(samples))
+    discounts = map(d->gamma*d, discounts)
+
+    # (2) predict Q(s,a) over all possible actions
+
+    # (2.1) batch controller states
+    h = c = nothing
+    if samples[1].h != nothing
+        h = mapreduce(s->s[end].h, hcat, samples)
+    end
+    if samples[1].c != nothing
+        c = mapreduce(s->s[end].c, hcat, samples)
+    end
+
+    # (2.2) batch environment states - aka controller inputs
+    sa = map(s->(s[end].input_symbol, s[end].input_action), samples)
+    inputs = zeros(length(s2i)+length(a2i), length(samples))
+    for k = 1:length(sa) # symbol-action pairs
+        inputs[s2i[sa[1]],k] = 1
+        inputs[length(s2i)+a2i[sa[2]]] = 1
+    end
+
+    # (2.3) convert and propagate
+    # FIXME: propagate is redundant
+    targets = convert(atype, targets)
+    inputs = convert(atype, inputs)
+    h = h == nothing ? h : convert(atype,h)
+    c = c == nothing ? c : convert(atype,c)
+    discounts = convert(atype, discounts)
+    discounts = reshape(discounts, 1, length(discounts))
+    cout, h, c = propagate(w[:wcont], w[:bcont], inputs, h, c)
+
+    # (2.4) main part - compute Q(s,a') over all possible actions
+    # then, find which action maximizes it and select its value
+    qsa0 = predict(w[:wact],w[:bact],cout)
+    qsa1 = maximum(qsa0,1)
+    qsa2 = sum(qsa0 .* (qsa1.==qsa0), 1)
+    qsa3 = reshape(qsa2, 1, length(qsa2))
+
+    targets += discounts .* qsa3
+    return targets
+end
+
+function make_batch(obj::ReplayMemory, args..., s2i, a2i, batchsize)
+    samples = sample(obj, batchsize)
+    targets = compute_targets(samples, args..., s2i, a2i)
+    atype = typeof(targets)
+
+    # xs <-> inputs (read symbol+previous action) - onehots
+    xs = zeros(length(s2i)+length(a2i),length(samples))
+    for (i,sample) in enumerate(samples)
+        xs[s2i[sample[1].input_symbol],i] = 1
+        xs[length(s2i)+a2i[sample[1].input_action],i] = 1
+    end
+    xs = convert(atype, xs)
+
+    # ys <-> output symbols
+    # as <-> actions
+    ys = map(s->s[1].output_symbol, samples)
+    as = map(s->s[1].output_action, samples)
+
+    h = c = nothing
+    if samples[1].h != nothing
+        h = mapreduce(s->s[1].h, hcat, samples)
+        h = convert(atype, h)
+    end
+    if samples[1].c != nothing
+        c = mapreduce(s->s[1].c, hcat, samples)
+        c = convert(atype, c)
+    end
+
+    return targets, xs, ys, as, h, c
 end

@@ -1,6 +1,8 @@
 import Base: push!
 import Base: length
 import Base: empty!
+import Base: pop!
+import Base: getindex
 
 const ACTIONS = ("mr","ml","up","down", "<s>")
 # <s> token stands for start in input, stop in output
@@ -244,7 +246,7 @@ type ReplayMemory
     end
 end
 
-function push!(obj::ReplayMemory, t::Transition)
+function push!(obj::ReplayMemory, t)
     push!(obj.memory, t)
     length(obj.memory) > obj.capacity && shift!(obj.memory)
 end
@@ -257,16 +259,16 @@ function empty!(obj::ReplayMemory)
     empty!(obj.memory)
 end
 
-function sample(obj::ReplayMemory, batchsize, nsteps=20)
-    batchsize = min(length(obj), batchsize)
-    indices = randperm(length(obj))[1:batchsize]
+function pop!(obj::ReplayMemory)
+    pop!(obj.memory)
+end
 
-    # nsteps q-learning
+function sample(obj::Replaymemory, nsamples, nsteps)
     samples = []
+    indices = randperm(length(obj))[1:min(nsamples,length(obj))]
     for ind in indices
-        push!(samples, obj.memory[ind:min(ind+nsteps-1),length(obj)])
+        push!(samples, obj.memory[ind:min(ind+nsteps-1,length(obj))])
     end
-
     return samples
 end
 
@@ -318,8 +320,15 @@ function run_episodes!(
             # push to replay memory
             push!(mem, this_transition)
 
+            # move head
+            move_timestep!(g, k, action)
+
             # change controller state
             h = h1; c = c1
+
+            # change inputs
+            input_symbol = predicted[end]
+            input_action = action
 
             # if done, then break
             done && break
