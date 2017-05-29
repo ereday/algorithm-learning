@@ -302,6 +302,8 @@ function run_episodes!(
 
             # decide reward, termination, remaining steps
             reward, done, nsteps = get_reward(g, k, predicted)
+            # @show action,reward,done,nsteps,predicted[end]
+            # @show reward,predicted[end]
 
             # transition
             this_transition = Transition(

@@ -150,7 +150,7 @@ function rloss(w, targets, xs, ys, as, h, c; values=[])
 
     # hybrid loss calculation
     val = 0
-    val += -0.5 * logprob(ys, sympred) # sl loss, output symbols
+    val += -logprob(ys, sympred) # sl loss, output symbols
     val += 0.5 * sumabs2(targets-estimate) # rl loss, actions
 
     push!(values, val)
