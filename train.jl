@@ -7,7 +7,7 @@ include("model.jl")
 include("data.jl")
 include("vocab.jl")
 
-const CAPACITY = 50000
+const CAPACITY = 20000
 const EPS_INIT = 0.9
 const EPS_FINAL = 0.005
 const EPS_DECAY = 200
@@ -37,6 +37,7 @@ function main(args)
         ("--supervised"; action=:store_true; help="if not, q-learning")
         ("--capacity"; default=CAPACITY; arg_type=Int64)
         ("--nsteps"; default=20; arg_type=Int64)
+        ("--update"; default=5000; arg_type=Int64)
     end
 
     isa(args, AbstractString) && (args=split(args))
@@ -47,7 +48,7 @@ function main(args)
 
     # init model, params etc.
     w = wfix = opts = s2i = i2s = nothing
-    a2i, i2a = initvocab(ACTIONS)
+    a2i, i2a = initvocab(get_actions(o[:task]))
     if o[:loadfile] == nothing
         s2i, i2s = initvocab(get_symbols(o[:task]))
         w = initweights(
@@ -99,7 +100,7 @@ function main(args)
             else # rl train
                 # run new episodes
                 steps_done = run_episodes!(
-                    game, mem, w, h, c, s2i, i2s, a2i, i2a, steps_done; o=o)
+                    game, mem, wfix, h, c, s2i, i2s, a2i, i2a, steps_done; o=o)
 
                 # train with batches from memory
                 for k = 1:o[:period]
@@ -108,9 +109,14 @@ function main(args)
                                        s2i, a2i, o[:batchsize])
                     batchloss = rltrain!(w,batch...,opts)
                     batchloss = batchloss / batchsize
-                    lossval = update_lossval(lossval,batchloss,iter)
                     iter += 1
+                    lossval = update_lossval(lossval,batchloss,iter)
                 end
+
+                # if iter % o[:update] == 0
+                #     wfix = Dict(map(k->(k,copy(w[k])), keys(w)))
+                #     empty!(mem)
+                # end
             end
 
             # perform the validation
@@ -151,15 +157,19 @@ function sltrain!(w,x,y,h,c,opts)
     return values[1]
 end
 
-function rltrain!(w,targets,x,y,a,h,c,opts)
+function rltrain!(w,targets,x,y,a,h,c,vs,opts)
     values = []
-    gloss = rlgradient(w,targets,x,y,a,h,c; values=values)
+    gloss = rlgradient(w,targets,x,y,a,h,c,vs; values=values)
     update!(w, gloss, opts)
     return values[1]
 end
 
 function validate(w,s2i,i2s,a2i,i2a,data,o)
-    batches = map(i->data[i:i+o[:batchsize]-1], [1:o[:batchsize]:length(data)...])
+    batches = []
+    for k = 1:o[:batchsize]:length(data)
+        push!(batches, data[k:min(k+o[:batchsize]-1,length(data))])
+    end
+
     ncorrect = 0
     for batch in batches
         x = map(xi->xi[1], batch)

@@ -130,7 +130,7 @@ end
 # as => actions taken by following behaviour policy
 # targets => temporal difference learning targets
 # TODO: make it sequential?
-function rloss(w, targets, xs, ys, as, h, c; values=[])
+function rloss(w, targets, xs, ys, as, h, c, vs; values=[])
     # propagate controller, same with previous
     cout, h, c = propagate(w[:wcont], w[:bcont], xs, h, c)
 
@@ -145,12 +145,13 @@ function rloss(w, targets, xs, ys, as, h, c; values=[])
     index = as + nrows*(0:(length(as)-1))
 
     # compute estimate
-    qs = qsa[index]
+    qs = qsa[index]  # divide by nsteps remaining
     estimate = reshape(qs, 1, length(qs))
+    estimate = estimate ./ vs
 
     # hybrid loss calculation
     val = 0
-    val += -0.5 * logprob(ys, sympred) # sl loss, output symbols
+    val += -0.5*logprob(ys, sympred) # sl loss, output symbols
     val += 0.5 * sumabs2(targets-estimate) # rl loss, actions
 
     push!(values, val)
@@ -247,6 +248,9 @@ function make_batch(
         c = mapreduce(s->s[1].c, hcat, samples)
         c = convert(atype, c)
     end
+    vs = map(si->si[1].nsteps, samples)
+    vs = reshape(vs, 1, length(vs))
+    vs = convert(atype, vs)
 
-    return targets, xs, ys, as, h, c
+    return targets, xs, ys, as, h, c, vs
 end

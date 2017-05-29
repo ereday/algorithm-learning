@@ -4,7 +4,7 @@ import Base: empty!
 import Base: pop!
 import Base: getindex
 
-const ACTIONS = ("mr","ml","up","down", "<s>")
+
 # <s> token stands for start in input, stop in output
 
 type Game
@@ -231,6 +231,7 @@ type Transition
     # next environment state
     output_symbol
     output_action
+    done
 end
 
 type ReplayMemory
@@ -264,7 +265,13 @@ function sample(obj::ReplayMemory, nsamples, nsteps)
     samples = []
     indices = randperm(length(obj))[1:min(nsamples,length(obj))]
     for ind in indices
-        push!(samples, obj.memory[ind:min(ind+nsteps-1,length(obj))])
+        sample = []
+        for k = ind:min(ind+nsteps-1,length(obj))
+            step = obj.memory[k]
+            push!(sample, step)
+            step.done && break
+        end
+        push!(samples, sample)
     end
     return samples
 end
@@ -303,6 +310,11 @@ function run_episodes!(
             # decide reward, termination, remaining steps
             reward, done, nsteps = get_reward(g, k, predicted)
 
+            # very stupid scenario, terminate episode and start a new one
+            if action == "<s>" && !done
+                break
+            end
+
             # transition
             this_transition = Transition(
                 reward,
@@ -312,7 +324,8 @@ function run_episodes!(
                 h != nothing ? Array(h) : nothing,
                 c != nothing ? Array(c) : nothing,
                 predicted[end], # output_symbol
-                action)
+                action,
+                done)
 
             # push to replay memory
             push!(mem, this_transition)
