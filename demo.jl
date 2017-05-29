@@ -2,22 +2,23 @@ using JSON,Images,ArgParse
 
 const IMGH  = 90
 const IMGW  = 60
-const RIGHT = "r"
-const LEFT  = "l"
+const RIGHT = "mr"
+const LEFT  = "ml"
 const UP    = "u"
 const DOWN  = "d"
-
+const NOOP  = -78
+const EOF   = -2 # eof for reverse data 
+const OUTDIR ="outimg/"
 function parsedoc(fname)
     inf = JSON.parsefile(fname)
-    global taskname = inf["task"]     # "copy"
-    global input    = inf["input"]    # " 3 4 2 1 "
-    global actions  = inf["actions"]  # "r r r r asd"
-    global output   = inf["output"]   # "3 4 2 1"
-    global spos     = inf["startpos"] # [1,-1] or [3,4] for 2d 
+    global taskname = inf["task"]    
+    global input    = inf["input"]   
+    global actions  = inf["actions"] 
+    global output   = inf["output"]  
+    global spos     = inf["startpos"]
 end
 
 function makegrids(input,output)
-    #    name(x)=(x==-1?string("img/emptycell.png"):string("img/n",x,".png"))
     name(x)=string("img/n",x,".png")
     ri = Any[]
     if length(input) > 1
@@ -28,11 +29,11 @@ function makegrids(input,output)
                 input[i] = [[10 for i=1:maxlen-length(input[i])]...,input[i]...]
             end
         end
-    end
-    
+    end    
     for i=1:length(input)
         singlerow = load(name(input[i][1]))
         for j=2:length(input[i])
+            if input[i][j] == EOF;break; end # reverse task case 
             singlerow = hcat(singlerow,load(name(input[i][j])))
         end
         push!(ri,singlerow)
@@ -40,10 +41,14 @@ function makegrids(input,output)
     ri   = vcat(ri...)    
     outs = [zeros(similar(load(name(input[1][1])))) for i=1:length(output)]
     ro   = hcat(outs...)
+    ro = ro .+ RGBA(1,1,1,1)
+    println("size ri:",size(ri))
     return ri,ro 
 end 
 
+# input grid 
 function modifygrid(ipos,igrid,frame,counter)
+    println("input grid modify",ipos)
    # println(ipos)
     if ipos[1] != -1
         xstart = (ipos[1]-1) * IMGH + 1
@@ -51,39 +56,83 @@ function modifygrid(ipos,igrid,frame,counter)
         xstart = 1
     end
     ystart = (ipos[2]-1) * IMGW + 1
-    igridtmp = convert(Array{Float32},rawview(channelview(igrid)))    
+    igridtmp = convert(Array{Float32},rawview(channelview(igrid)))
+    if ystart > size(igridtmp,3)
+        ystart = (ipos[2] -2) * IMGW + 1
+    end
     igridtmp[1:3,xstart:(xstart+IMGH-1),ystart:(ystart+IMGW-1)] += frame
     # small correction
 #    igridtmp[2:3,xstart:(xstart+IMGH-1),ystart:(ystart+IMGW-1)] = 0
     igridtmp[igridtmp .> 255] = 255
     igrid = colorview(RGBA,igridtmp./255)
-    save(string("c",counter,".png"),igrid)
+    if counter < 10 
+        save(string(OUTDIR,"itape0",counter,".png"),igrid)
+    else
+        save(string(OUTDIR,"itape",counter,".png"),igrid)
+    end
 end
 
-function run(igrid,ogrid,actions,spos,frame)
+# output grid 
+function modifygrid(img::String,opos,ogrid,counter,frame)
+    println("output grid modify",opos)
+    if img == "NOOP"
+        noopimg = img = ones(RGBA{N0f8}, 90, 300)
+        if counter < 10 
+            save(string(OUTDIR,"otape0",counter,".png"),noopimg)
+        else
+            save(string(OUTDIR,"otape",counter,".png"),noopimg)
+        end
+        return noopimg,opos
+    end
+    ystart = (opos[2]-1)*IMGW + 1
+    ogridtmp = convert(Array{Float32},rawview(channelview(ogrid)))    
+    outnum = convert(Array{Float32},rawview(channelview(load(img))))
+    ogridtmp[:,:,ystart:(ystart+IMGW-1)] = outnum
+    result = copy(ogridtmp)
+    ogridtmp[1:3,:,ystart:(ystart+IMGW-1)] += frame 
+    ogridtmp[ogridtmp .> 255] = 255
+    ogrid = colorview(RGBA,ogridtmp./255)
+    if counter < 10 
+        save(string(OUTDIR,"otape0",counter,".png"),ogrid)
+    else
+        save(string(OUTDIR,"otape",counter,".png"),ogrid)
+    end
+    return result,[opos[1],opos[2]+1]
+end
+
+function run(igrid,ogrid,actions,outputs,spos,frame)
+    name(x)=(x == NOOP ? "NOOP":string("img/n",x,".png"))
     oldi   = igrid
     oldo   = ogrid
     ipos   = spos
-    opos   = (1,-1)
+    if taskname in ["copy","reverse"]
+        opos = (-1,1)
+    else taskname in ["add","add3","multip"]
+        opos = (-1,length(outputs) - length(find(x->x==NOOP,outputs)))
+    end
     counter = 0 
     modifygrid(ipos,igrid,frame,counter)
-    for action in actions 
+    for (index,action) in enumerate(actions)       
+        # modify output tape        
+        ogrid,opos  = modifygrid(name(outputs[index]),opos,ogrid,counter,frame)
         counter +=1
-        igrid = oldi
-        ipos = move(action,ipos,size(oldi,1),size(oldi,2))
-        modifygrid(ipos,igrid,frame,counter)
+        igrid = oldi        
+        ipos = move(action,ipos,Int(size(oldi,1)/IMGH),Int(size(oldi,2)/IMGW))
+        modifygrid(ipos,igrid,frame,counter)   
     end    
 end
 
 function main()
     opts = parse_commandline()
     parsedoc(opts[:jsonfile])
+    println("actions:",actions)
+    println("input:",input)
+    println("output:",output)
     igrid,ogrid = makegrids(input,output)
     frame = makeframe()
-
-    #println(spos)
-    run(igrid,ogrid,actions,spos,frame)
-    
+    # spos     -> copy,reverse (-1,1)
+    # addition/mul -> (-1,k)
+    run(igrid,ogrid,actions,output,spos,frame)    
 end
 
 function makeframe()
