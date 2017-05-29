@@ -31,6 +31,7 @@ function main(args)
         ("--dist"; arg_type=String; default="randn"; help="[randn|xavier]")
         ("--supervised"; action=:store_true; help="if not, q-learning")
         ("--capacity"; default=CAPACITY; arg_type=Int64)
+        ("--nsteps"; default=20; arg_type=Int64)
     end
 
     isa(args, AbstractString) && (args=split(args))
@@ -85,7 +86,7 @@ function main(args)
                 outputs = make_outputs(game, s2i, a2i)
                 timesteps = length(inputs)
                 batchsize = o[:batchsize]
-                batchloss = train!(w,inputs,outputs,h,c,opts)
+                batchloss = sltrain!(w,inputs,outputs,h,c,opts)
                 batchloss = batchloss / (batchsize * timesteps)
                 iter += 1
             else # rl train
@@ -134,9 +135,9 @@ function main(args)
     end
 end
 
-function train!(w,x,y,h,c,opts)
+function sltrain!(w,x,y,h,c,opts)
     values = []
-    gloss = lossgradient(w,x,y,h,c; values=values)
+    gloss = slgradient(w,x,y,h,c; values=values)
     update!(w, gloss, opts)
     return values[1]
 end

@@ -44,7 +44,7 @@ end
 # x1,y1 => input/output for symbols
 # x2,y2 => input/output for actions
 # weighted loss for soft symbol/action distributions
-function loss(w,x,y,h,c; values=[])
+function sloss(w,x,y,h,c; values=[])
     batchsize = size(x[1][1],2)
     atype = typeof(AutoGrad.getval(w[:wcont]))
 
@@ -71,16 +71,7 @@ function loss(w,x,y,h,c; values=[])
     return -lossval/(batchsize*length(x))
 end
 
-lossgradient = grad(loss)
-
-function logprob(output, ypred)
-    nrows,ncols = size(ypred)
-    index = output + nrows*(0:(length(output)-1))
-    o1 = logp(ypred,1)
-    o2 = o1[index]
-    o3 = sum(o2)
-    return o3
-end
+slgradient = grad(sloss)
 
 function initweights(
     atype,units,nsymbols,nactions,
@@ -121,4 +112,45 @@ function initopts(w,lr=0.001,gclip=5.0)
         opts[k] = Adam(;lr=lr,gclip=gclip)
     end
     return opts
+end
+
+
+# Reinforcement Learning stuff
+# xs => controller inputs (concat prev_action and read_symbol)
+# ys => controller symbol outputs written to output tape
+# as => actions taken by following behaviour policy
+# targets => temporal difference learning targets
+# TODO: make it sequential?
+function rloss(w, targets, xs, ys, as, h, c; values=[])
+    # propagate controller, same with previous
+    cout, h, c = propagate(w[:wcont], w[:bcont], xs, h, c)
+
+    # symbol prediction, same
+    sympred = predict(w[:wsymb], w[:bsymb], cout)
+
+    # action estimation, same
+    qsa = predict(w[:wact], w[:bact], cout)
+
+    # compute indices
+    nrows, ncols = size(qsa)
+    index = actions + nrows*(0:(length(actions)-1))
+
+    # compute estimate
+    qs = qsa[index]
+    estimate = reshape(qs, 1, length(qs))
+
+    # hybrid loss calculation
+    val = 0
+    val += 0.5 * logprob(ys, sympred) # sl loss, output symbols
+    val += 0.5 * sumabs2(targets-estimate) # rl loss, actions
+
+    push!(values, val)
+    return val
+end
+
+rlgradient = grad(rloss)
+
+# compute TD targets for objective
+function compute_targets(samples, wfix, discount)
+    error("nothing yet")
 end

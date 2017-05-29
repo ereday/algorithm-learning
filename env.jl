@@ -270,10 +270,6 @@ function sample(obj::ReplayMemory, batchsize, nsteps=20)
     return samples
 end
 
-function sample_action()
-    error("not implemented yet")
-end
-
 # currently I don't have an efficient idea to run episodes parallel
 # I just leave it in this way for simplicity
 function run_episodes!(
