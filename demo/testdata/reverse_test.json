@@ -1,0 +1,1 @@
+{"task":"reverse","startpos":[-1,1],"actions":["mr","mr","mr","mr","mr","ml","ml","ml","ml","ml","ml"],"output":[-78,-78,-78,-78,-78,-78,4,4,8,6,3],"input":[[3,6,8,4,4,-2]]}
