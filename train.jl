@@ -7,7 +7,7 @@ include("model.jl")
 include("data.jl")
 include("vocab.jl")
 
-const CAPACITY = 50000
+const CAPACITY = 20000
 const EPS_INIT = 0.9
 const EPS_FINAL = 0.005
 const EPS_DECAY = 200
@@ -48,7 +48,7 @@ function main(args)
 
     # init model, params etc.
     w = wfix = opts = s2i = i2s = nothing
-    a2i, i2a = initvocab(ACTIONS)
+    a2i, i2a = initvocab(get_actions(o[:task]))
     if o[:loadfile] == nothing
         s2i, i2s = initvocab(get_symbols(o[:task]))
         w = initweights(
@@ -157,9 +157,9 @@ function sltrain!(w,x,y,h,c,opts)
     return values[1]
 end
 
-function rltrain!(w,targets,x,y,a,h,c,opts)
+function rltrain!(w,targets,x,y,a,h,c,vs,opts)
     values = []
-    gloss = rlgradient(w,targets,x,y,a,h,c; values=values)
+    gloss = rlgradient(w,targets,x,y,a,h,c,vs; values=values)
     update!(w, gloss, opts)
     return values[1]
 end
