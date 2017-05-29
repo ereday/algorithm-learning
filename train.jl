@@ -7,15 +7,22 @@ include("model.jl")
 include("data.jl")
 include("vocab.jl")
 
+const CAPACITY = 50000
+const EPS_INIT = 0.9
+const EPS_FINAL = 0.005
+const EPS_DECAY = 200
+
 function main(args)
     s = ArgParseSettings()
     s.description = ""
 
     @add_arg_table s begin
         # load/save files
+        ("--loadfile"; default=nothing)
+        ("--savefile"; default=nothing)
         ("--task"; default="copy")
         ("--seed"; default=-1; arg_type=Int64; help="random seed")
-        ("--lr"; default=0.001)
+        ("--optim"; default="Rmsprop()")
         ("--units"; default=200)
         ("--controller"; default="feedforward"; help="feedforward or lstm")
         ("--discount"; default=0.95)
@@ -26,7 +33,10 @@ function main(args)
         ("--nvalid"; default=60; arg_type=Int64)
         ("--atype"; default=(gpu()>=0 ? "KnetArray{Float32}":"Array{Float32}"))
         ("--period"; default=100; arg_type=Int64)
-        ("--dist";arg_type=String;default="randn";help="[randn|xavier]")
+        ("--dist"; arg_type=String; default="randn"; help="[randn|xavier]")
+        ("--supervised"; action=:store_true; help="if not, q-learning")
+        ("--capacity"; default=CAPACITY; arg_type=Int64)
+        ("--nsteps"; default=20; arg_type=Int64)
     end
 
     isa(args, AbstractString) && (args=split(args))
@@ -36,18 +46,33 @@ function main(args)
     data_generator = get_data_generator(o[:task])
 
     # init model, params etc.
-    s2i, i2s = initvocab(get_symbols(o[:task]))
+    w = wfix = opts = s2i = i2s = nothing
     a2i, i2a = initvocab(ACTIONS)
-    w = initweights(
-        o[:atype],o[:units],length(s2i),length(a2i),o[:controller],o[:dist])
-    opts = initopts(w)
+    if o[:loadfile] == nothing
+        s2i, i2s = initvocab(get_symbols(o[:task]))
+        w = initweights(
+            o[:atype],o[:units],length(s2i),length(a2i),o[:controller],o[:dist])
+        opts = initopts(w,o[:optim])
+    else
+        o[:task] = load(o[:loadfile], "task")
+        w = load(o[:loadfile], "w")
+        # opts - not yet!
+        # opts = load(o[:loadfile])
+        o[:start] = load(o[:loadfile], "complexity")
+        s2i, i2s = initvocab(get_symbols(o[:task]))
+    end
+    mem = ReplayMemory(o[:capacity])
+    if !o[:supervised]
+        wfix = Dict(map(k->(k,copy(w[k])), keys(w)))
+    end
 
     # C => complexity
     # c => controller cell
+    steps_done = 0
     for C = o[:start]:o[:step]:o[:end]
         seqlen = div(C, complexities[o[:task]])
         val = map(xi->data_generator(seqlen), [1:o[:nvalid]...])
-        iter = 1
+        iter = 0
         lossval = 0
 
         while true
@@ -58,40 +83,77 @@ function main(args)
             game = Game(x,y,actions,o[:task])
             T = length(game.symgold[1])
 
-            inputs = make_inputs(game, s2i, a2i)
-            outputs = make_outputs(game, s2i, a2i)
-            timesteps = length(inputs)
-            batchsize = o[:batchsize]
-            h,c = initstates(o[:atype],o[:units],o[:batchsize],o[:controller])
-            batchloss = train!(w,inputs,outputs,h,c,opts)
-            batchloss = batchloss / (batchsize * timesteps)
+            h,c = initstates(
+                o[:atype],o[:units],o[:batchsize],o[:controller])
 
-            if iter < 100
-                lossval = (iter-1)*lossval + batchloss
-                lossval = lossval / iter
-            else
-                lossval = 0.01 * batchloss + 0.99 * lossval
+            # FIXME: sl.iter != rl.iter (but how)
+            if o[:supervised]
+                inputs = make_inputs(game, s2i, a2i)
+                outputs = make_outputs(game, s2i, a2i)
+                timesteps = length(inputs)
+                batchsize = o[:batchsize]
+                batchloss = sltrain!(w,inputs,outputs,h,c,opts)
+                batchloss = batchloss / (batchsize * timesteps)
+                iter += 1
+                lossval = update_lossval(lossval,batchloss,iter)
+            else # rl train
+                # run new episodes
+                steps_done = run_episodes!(
+                    game, mem, w, h, c, s2i, i2s, a2i, i2a, steps_done; o=o)
+
+                # train with batches from memory
+                for k = 1:o[:period]
+                    batchsize = o[:batchsize]
+                    batch = make_batch(mem, wfix, o[:discount], o[:nsteps],
+                                       s2i, a2i, o[:batchsize])
+                    batchloss = rltrain!(w,batch...,opts)
+                    batchloss = batchloss / batchsize
+                    lossval = update_lossval(lossval,batchloss,iter)
+                    iter += 1
+                end
             end
 
             # perform the validation
             if iter % o[:period] == 0
-                println("batchloss:$batchloss")
+                println("lossval:$lossval")
                 acc = validate(w,s2i,i2s,a2i,i2a,val,o)
                 println("(iter:$iter,acc:$acc)")
                 if acc > 0.98
                     println("$C converged in $iter iteration")
-                    # Knet.gc(); gc()
+                    # Knet.gc(); gc(); Knet.gc()
+
+                    # save model
+                    if o[:savefile] != nothing
+                        save(o[:savefile],
+                             "w", map(Array, w),
+                             # need something like above for opts
+                             # "opts", opts,
+                             "task", o[:task],
+                             "complexity", C)
+                    end
+
+                    if !o[:supervised]
+                        wfix = Dict(map(k->(k,copy(w[k])), keys(w)))
+                        empty!(mem)
+                    end
+
                     break
                 end
-            end
-            iter += 1
-        end
-    end
+            end # validation
+        end # while true
+    end # one complexity step
 end
 
-function train!(w,x,y,h,c,opts)
+function sltrain!(w,x,y,h,c,opts)
     values = []
-    gloss = lossgradient(w,x,y,h,c; values=values)
+    gloss = slgradient(w,x,y,h,c; values=values)
+    update!(w, gloss, opts)
+    return values[1]
+end
+
+function rltrain!(w,targets,x,y,a,h,c,opts)
+    values = []
+    gloss = rlgradient(w,targets,x,y,a,h,c; values=values)
     update!(w, gloss, opts)
     return values[1]
 end
@@ -140,6 +202,16 @@ function validate(w,s2i,i2s,a2i,i2a,data,o)
         ncorrect += sum(correctness)
     end
     return ncorrect / length(data)
+end
+
+function update_lossval(lossval,batchloss,iter)
+    if iter < 100
+        lossval = (iter-1)*lossval + batchloss
+        lossval = lossval / iter
+    else
+        lossval = 0.01 * batchloss + 0.99 * lossval
+    end
+    return lossval
 end
 
 !isinteractive() && !isdefined(Core.Main, :load_only) && main(ARGS)
