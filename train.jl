@@ -8,6 +8,9 @@ include("data.jl")
 include("vocab.jl")
 
 const CAPACITY = 50000
+const EPS_INIT = 0.9
+const EPS_FINAL = 0.005
+const EPS_DECAY = 200
 
 function main(args)
     s = ArgParseSettings()
@@ -15,9 +18,11 @@ function main(args)
 
     @add_arg_table s begin
         # load/save files
+        ("--loadfile"; default=nothing)
+        ("--savefile"; default=nothing)
         ("--task"; default="copy")
         ("--seed"; default=-1; arg_type=Int64; help="random seed")
-        ("--lr"; default=0.001)
+        ("--optim"; default="Rmsprop()")
         ("--units"; default=200)
         ("--controller"; default="feedforward"; help="feedforward or lstm")
         ("--discount"; default=0.95)
@@ -47,7 +52,7 @@ function main(args)
         s2i, i2s = initvocab(get_symbols(o[:task]))
         w = initweights(
             o[:atype],o[:units],length(s2i),length(a2i),o[:controller],o[:dist])
-        opts = initopts(w)
+        opts = initopts(w,o[:optim])
     else
         o[:task] = load(o[:loadfile], "task")
         w = load(o[:loadfile], "w")
@@ -63,6 +68,7 @@ function main(args)
 
     # C => complexity
     # c => controller cell
+    steps_done = 0
     for C = o[:start]:o[:step]:o[:end]
         seqlen = div(C, complexities[o[:task]])
         val = map(xi->data_generator(seqlen), [1:o[:nvalid]...])
@@ -80,6 +86,7 @@ function main(args)
             h,c = initstates(
                 o[:atype],o[:units],o[:batchsize],o[:controller])
 
+            # FIXME: sl.iter != rl.iter (but how)
             if o[:supervised]
                 inputs = make_inputs(game, s2i, a2i)
                 outputs = make_outputs(game, s2i, a2i)
@@ -91,8 +98,8 @@ function main(args)
                 lossval = update_lossval(lossval,batchloss,iter)
             else # rl train
                 # run new episodes
-                run_episodes!(
-                    g, mem, w, h, c, s2i, i2s, a2i, i2a, steps_done; o=o)
+                steps_done = run_episodes!(
+                    game, mem, w, h, c, s2i, i2s, a2i, i2a, steps_done; o=o)
 
                 # train with batches from memory
                 for k = 1:o[:period]
@@ -108,7 +115,7 @@ function main(args)
 
             # perform the validation
             if iter % o[:period] == 0
-                println("batchloss:$batchloss")
+                println("lossval:$lossval")
                 acc = validate(w,s2i,i2s,a2i,i2a,val,o)
                 println("(iter:$iter,acc:$acc)")
                 if acc > 0.98
@@ -116,12 +123,14 @@ function main(args)
                     # Knet.gc(); gc(); Knet.gc()
 
                     # save model
-                    save(o[:savefile],
-                         "w", map(Array, w),
-                         # need something like above for opts
-                         # "opts", opts,
-                         "task", o[:task],
-                         "complexity", C)
+                    if o[:savefile] != nothing
+                        save(o[:savefile],
+                             "w", map(Array, w),
+                             # need something like above for opts
+                             # "opts", opts,
+                             "task", o[:task],
+                             "complexity", C)
+                    end
 
                     if !o[:supervised]
                         wfix = Dict(map(k->(k,copy(w[k])), keys(w)))

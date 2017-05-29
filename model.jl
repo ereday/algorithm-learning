@@ -41,6 +41,15 @@ function predict(w,b,x)
     return w * x .+ b
 end
 
+function logprob(output, ypred)
+    nrows,ncols = size(ypred)
+    index = output + nrows*(0:(length(output)-1))
+    o1 = logp(ypred,1)
+    o2 = o1[index]
+    o3 = sum(o2)
+    return o3
+end
+
 # x1,y1 => input/output for symbols
 # x2,y2 => input/output for actions
 # weighted loss for soft symbol/action distributions
@@ -106,10 +115,10 @@ function initstates(atype, hidden, batchsize, controller="lstm")
     end
 end
 
-function initopts(w,lr=0.001,gclip=5.0)
+function initopts(w,optim)
     opts = Dict()
     for k in keys(w)
-        opts[k] = Adam(;lr=lr,gclip=gclip)
+        opts[k] = eval(parse(optim))
     end
     return opts
 end
@@ -141,11 +150,11 @@ function rloss(w, targets, xs, ys, as, h, c; values=[])
 
     # hybrid loss calculation
     val = 0
-    val += 0.5 * logprob(ys, sympred) # sl loss, output symbols
+    val += -0.5 * logprob(ys, sympred) # sl loss, output symbols
     val += 0.5 * sumabs2(targets-estimate) # rl loss, actions
 
     push!(values, val)
-    return val
+    return val / size(targets,2)
 end
 
 rlgradient = grad(rloss)
@@ -167,16 +176,16 @@ function compute_targets(samples, w, discount, nsteps, s2i, a2i)
     get_steps(s) = (s[1].nsteps, s[end].nsteps)
     gamma = discounts[end]
     discounts = map(i->get_steps(samples[i]), 1:length(samples))
-    discounts = map(d->gamma*d, discounts)
+    discounts = map(d->gamma*(d[2]/d[1]), discounts)
 
     # (2) predict Q(s,a) over all possible actions
 
     # (2.1) batch controller states
     h = c = nothing
-    if samples[1].h != nothing
+    if samples[1][1].h != nothing
         h = mapreduce(s->s[end].h, hcat, samples)
     end
-    if samples[1].c != nothing
+    if samples[1][1].c != nothing
         c = mapreduce(s->s[end].c, hcat, samples)
     end
 
@@ -184,18 +193,19 @@ function compute_targets(samples, w, discount, nsteps, s2i, a2i)
     sa = map(s->(s[end].input_symbol, s[end].input_action), samples)
     inputs = zeros(length(s2i)+length(a2i), length(samples))
     for k = 1:length(sa) # symbol-action pairs
-        inputs[s2i[sa[1]],k] = 1
-        inputs[length(s2i)+a2i[sa[2]]] = 1
+        inputs[s2i[sa[k][1]],k] = 1
+        inputs[length(s2i)+a2i[sa[k][2]]] = 1
     end
 
     # (2.3) convert and propagate
     # FIXME: propagate is redundant
+    atype = typeof(w[:wcont])
     targets = convert(atype, targets)
     inputs = convert(atype, inputs)
     h = h == nothing ? h : convert(atype,h)
     c = c == nothing ? c : convert(atype,c)
-    discounts = convert(atype, discounts)
     discounts = reshape(discounts, 1, length(discounts))
+    discounts = convert(atype, discounts)
     cout, h, c = propagate(w[:wcont], w[:bcont], inputs, h, c)
 
     # (2.4) main part - compute Q(s,a') over all possible actions
@@ -209,9 +219,10 @@ function compute_targets(samples, w, discount, nsteps, s2i, a2i)
     return targets
 end
 
-function make_batch(obj::ReplayMemory, args..., s2i, a2i, batchsize)
-    samples = sample(obj, batchsize)
-    targets = compute_targets(samples, args..., s2i, a2i)
+function make_batch(
+    obj::ReplayMemory, w, discount, nsteps, s2i, a2i, batchsize)
+    samples = sample(obj, batchsize, nsteps)
+    targets = compute_targets(samples, w, discount, nsteps, s2i, a2i)
     atype = typeof(targets)
 
     # xs <-> inputs (read symbol+previous action) - onehots
@@ -224,15 +235,15 @@ function make_batch(obj::ReplayMemory, args..., s2i, a2i, batchsize)
 
     # ys <-> output symbols
     # as <-> actions
-    ys = map(s->s[1].output_symbol, samples)
-    as = map(s->s[1].output_action, samples)
+    ys = map(s->s[1].output_symbol, samples); ys = map(yi->s2i[yi],ys)
+    as = map(s->s[1].output_action, samples); as = map(ai->a2i[ai],as)
 
     h = c = nothing
-    if samples[1].h != nothing
+    if samples[1][1].h != nothing
         h = mapreduce(s->s[1].h, hcat, samples)
         h = convert(atype, h)
     end
-    if samples[1].c != nothing
+    if samples[1][1].c != nothing
         c = mapreduce(s->s[1].c, hcat, samples)
         c = convert(atype, c)
     end

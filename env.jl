@@ -72,9 +72,6 @@ type Game
             N,xtapes,ytapes,gtapes,yactions,xactions,
             task,pointers,symgold,timestep)
     end
-
-    function Game(w,x,y)
-    end
 end
 
 function init_pointers(grids,ninstances,task)
@@ -263,7 +260,7 @@ function pop!(obj::ReplayMemory)
     pop!(obj.memory)
 end
 
-function sample(obj::Replaymemory, nsamples, nsteps)
+function sample(obj::ReplayMemory, nsamples, nsteps)
     samples = []
     indices = randperm(length(obj))[1:min(nsamples,length(obj))]
     for ind in indices
@@ -286,9 +283,9 @@ function run_episodes!(
 
         while true
             # make one-hot input vector
-            input = zeros(1, length(s2i)+length(a2i))
-            input[input_symbol] = 1
-            input[length(s2i)+input_action] = 1
+            input = zeros(length(s2i)+length(a2i), 1)
+            input[s2i[input_symbol]] = 1
+            input[length(s2i)+a2i[input_action]] = 1
             input = convert(atype, input)
 
             # use controller
@@ -304,7 +301,7 @@ function run_episodes!(
             action = i2a[action]
 
             # decide reward, termination, remaining steps
-            reward, done, nsteps = get_reward(g, i, predicted)
+            reward, done, nsteps = get_reward(g, k, predicted)
 
             # transition
             this_transition = Transition(
