@@ -40,12 +40,8 @@ function main(args)
     o[:atype] = eval(parse(o[:atype]))
     data_generator = get_data_generator(o[:task])
 
-    if o[:loadfile] != nothing
-
-    end
-
     # init model, params etc.
-    w = opts = s2i = i2s = nothing
+    w = wfix = opts = s2i = i2s = nothing
     a2i, i2a = initvocab(ACTIONS)
     if o[:loadfile] == nothing
         s2i, i2s = initvocab(get_symbols(o[:task]))
@@ -61,6 +57,9 @@ function main(args)
         s2i, i2s = initvocab(get_symbols(o[:task]))
     end
     mem = ReplayMemory(o[:capacity])
+    if !o[:supervised]
+        wfix = Dict(map(k->(k,copy(w[k])), keys(w)))
+    end
 
     # C => complexity
     # c => controller cell
@@ -89,6 +88,7 @@ function main(args)
                 batchloss = sltrain!(w,inputs,outputs,h,c,opts)
                 batchloss = batchloss / (batchsize * timesteps)
                 iter += 1
+                lossval = update_lossval(lossval,batchloss,iter)
             else # rl train
                 # run new episodes
                 run_episodes!(
@@ -96,17 +96,14 @@ function main(args)
 
                 # train with batches from memory
                 for k = 1:o[:period]
+                    batchsize = o[:batchsize]
+                    batch = make_batch(mem, wfix, o[:discount], o[:nsteps],
+                                       s2i, a2i, o[:batchsize])
+                    batchloss = rltrain!(w,batch...,opts)
+                    batchloss = batchloss / batchsize
+                    lossval = update_lossval(lossval,batchloss,iter)
                     iter += 1
-                    error("nothing yet")
                 end
-            end
-
-            # running means
-            if iter < 100
-                lossval = (iter-1)*lossval + batchloss
-                lossval = lossval / iter
-            else
-                lossval = 0.01 * batchloss + 0.99 * lossval
             end
 
             # perform the validation
@@ -126,13 +123,16 @@ function main(args)
                          "task", o[:task],
                          "complexity", C)
 
+                    if !o[:supervised]
+                        wfix = Dict(map(k->(k,copy(w[k])), keys(w)))
+                        empty!(mem)
+                    end
+
                     break
                 end
-            end
-
-            !o[:supervised] && empty!(mem)
-        end
-    end
+            end # validation
+        end # while true
+    end # one complexity step
 end
 
 function sltrain!(w,x,y,h,c,opts)
@@ -193,6 +193,16 @@ function validate(w,s2i,i2s,a2i,i2a,data,o)
         ncorrect += sum(correctness)
     end
     return ncorrect / length(data)
+end
+
+function update_lossval(lossval,batchloss,iter)
+    if iter < 100
+        lossval = (iter-1)*lossval + batchloss
+        lossval = lossval / iter
+    else
+        lossval = 0.01 * batchloss + 0.99 * lossval
+    end
+    return lossval
 end
 
 !isinteractive() && !isdefined(Core.Main, :load_only) && main(ARGS)
