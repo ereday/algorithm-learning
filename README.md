@@ -6,7 +6,7 @@ Reimplementation of Learning Simple Algorithms From Examples paper on Julia
 - Make supervised grid tasks working
 - ~~GRU controller~~
 - ~~Model save~~
-- Visualization/demo
+- ~~Visualization/demo~~ (Have some harmless bugs. Still wip) 
 - Q-learning (work in progress)
 
 # Q-Learning
