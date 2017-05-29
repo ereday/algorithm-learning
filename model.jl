@@ -41,10 +41,19 @@ function predict(w,b,x)
     return w * x .+ b
 end
 
+function logprob(output, ypred)
+    nrows,ncols = size(ypred)
+    index = output + nrows*(0:(length(output)-1))
+    o1 = logp(ypred,1)
+    o2 = o1[index]
+    o3 = sum(o2)
+    return o3
+end
+
 # x1,y1 => input/output for symbols
 # x2,y2 => input/output for actions
 # weighted loss for soft symbol/action distributions
-function loss(w,x,y,h,c; values=[])
+function sloss(w,x,y,h,c; values=[])
     batchsize = size(x[1][1],2)
     atype = typeof(AutoGrad.getval(w[:wcont]))
 
@@ -71,16 +80,7 @@ function loss(w,x,y,h,c; values=[])
     return -lossval/(batchsize*length(x))
 end
 
-lossgradient = grad(loss)
-
-function logprob(output, ypred)
-    nrows,ncols = size(ypred)
-    index = output + nrows*(0:(length(output)-1))
-    o1 = logp(ypred,1)
-    o2 = o1[index]
-    o3 = sum(o2)
-    return o3
-end
+slgradient = grad(sloss)
 
 function initweights(
     atype,units,nsymbols,nactions,
@@ -115,10 +115,138 @@ function initstates(atype, hidden, batchsize, controller="lstm")
     end
 end
 
-function initopts(w,lr=0.001,gclip=5.0)
+function initopts(w,optim)
     opts = Dict()
     for k in keys(w)
-        opts[k] = Adam(;lr=lr,gclip=gclip)
+        opts[k] = eval(parse(optim))
     end
     return opts
+end
+
+
+# Reinforcement Learning stuff
+# xs => controller inputs (concat prev_action and read_symbol)
+# ys => controller symbol outputs written to output tape
+# as => actions taken by following behaviour policy
+# targets => temporal difference learning targets
+# TODO: make it sequential?
+function rloss(w, targets, xs, ys, as, h, c; values=[])
+    # propagate controller, same with previous
+    cout, h, c = propagate(w[:wcont], w[:bcont], xs, h, c)
+
+    # symbol prediction, same
+    sympred = predict(w[:wsymb], w[:bsymb], cout)
+
+    # action estimation, same
+    qsa = predict(w[:wact], w[:bact], cout)
+
+    # compute indices
+    nrows, ncols = size(qsa)
+    index = as + nrows*(0:(length(as)-1))
+
+    # compute estimate
+    qs = qsa[index]
+    estimate = reshape(qs, 1, length(qs))
+
+    # hybrid loss calculation
+    val = 0
+    val += -0.5 * logprob(ys, sympred) # sl loss, output symbols
+    val += 0.5 * sumabs2(targets-estimate) # rl loss, actions
+
+    push!(values, val)
+    return val / size(targets,2)
+end
+
+rlgradient = grad(rloss)
+
+# compute TD targets for objective
+function compute_targets(samples, w, discount, nsteps, s2i, a2i)
+    # reward calculations
+    discounts = map(i->discount^i, 0:nsteps)
+    targets = zeros(1, length(samples))
+    for k = 1:length(samples)
+        sample = samples[k]
+        vs, vsp = samples[k][1].nsteps, samples[k][end].nsteps
+        reward = mapreduce(
+            i->(sample[i].reward)*discounts[i]/vs, +, 1:length(sample))
+        targets[k] = reward
+    end
+
+    # (1) dynamic discount calculation for max Q(s,a)
+    get_steps(s) = (s[1].nsteps, s[end].nsteps)
+    gamma = discounts[end]
+    discounts = map(i->get_steps(samples[i]), 1:length(samples))
+    discounts = map(d->gamma*(d[2]/d[1]), discounts)
+
+    # (2) predict Q(s,a) over all possible actions
+
+    # (2.1) batch controller states
+    h = c = nothing
+    if samples[1][1].h != nothing
+        h = mapreduce(s->s[end].h, hcat, samples)
+    end
+    if samples[1][1].c != nothing
+        c = mapreduce(s->s[end].c, hcat, samples)
+    end
+
+    # (2.2) batch environment states - aka controller inputs
+    sa = map(s->(s[end].input_symbol, s[end].input_action), samples)
+    inputs = zeros(length(s2i)+length(a2i), length(samples))
+    for k = 1:length(sa) # symbol-action pairs
+        inputs[s2i[sa[k][1]],k] = 1
+        inputs[length(s2i)+a2i[sa[k][2]]] = 1
+    end
+
+    # (2.3) convert and propagate
+    # FIXME: propagate is redundant
+    atype = typeof(w[:wcont])
+    targets = convert(atype, targets)
+    inputs = convert(atype, inputs)
+    h = h == nothing ? h : convert(atype,h)
+    c = c == nothing ? c : convert(atype,c)
+    discounts = reshape(discounts, 1, length(discounts))
+    discounts = convert(atype, discounts)
+    cout, h, c = propagate(w[:wcont], w[:bcont], inputs, h, c)
+
+    # (2.4) main part - compute Q(s,a') over all possible actions
+    # then, find which action maximizes it and select its value
+    qsa0 = predict(w[:wact],w[:bact],cout)
+    qsa1 = maximum(qsa0,1)
+    qsa2 = sum(qsa0 .* (qsa1.==qsa0), 1)
+    qsa3 = reshape(qsa2, 1, length(qsa2))
+
+    targets += discounts .* qsa3
+    return targets
+end
+
+function make_batch(
+    obj::ReplayMemory, w, discount, nsteps, s2i, a2i, batchsize)
+    samples = sample(obj, batchsize, nsteps)
+    targets = compute_targets(samples, w, discount, nsteps, s2i, a2i)
+    atype = typeof(targets)
+
+    # xs <-> inputs (read symbol+previous action) - onehots
+    xs = zeros(length(s2i)+length(a2i),length(samples))
+    for (i,sample) in enumerate(samples)
+        xs[s2i[sample[1].input_symbol],i] = 1
+        xs[length(s2i)+a2i[sample[1].input_action],i] = 1
+    end
+    xs = convert(atype, xs)
+
+    # ys <-> output symbols
+    # as <-> actions
+    ys = map(s->s[1].output_symbol, samples); ys = map(yi->s2i[yi],ys)
+    as = map(s->s[1].output_action, samples); as = map(ai->a2i[ai],as)
+
+    h = c = nothing
+    if samples[1][1].h != nothing
+        h = mapreduce(s->s[1].h, hcat, samples)
+        h = convert(atype, h)
+    end
+    if samples[1][1].c != nothing
+        c = mapreduce(s->s[1].c, hcat, samples)
+        c = convert(atype, c)
+    end
+
+    return targets, xs, ys, as, h, c
 end

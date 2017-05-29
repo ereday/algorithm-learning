@@ -1,3 +1,9 @@
+import Base: push!
+import Base: length
+import Base: empty!
+import Base: pop!
+import Base: getindex
+
 const ACTIONS = ("mr","ml","up","down", "<s>")
 # <s> token stands for start in input, stop in output
 
@@ -12,6 +18,7 @@ type Game
     pointers
     symgold
     timestep
+    # terminated
     # mask
 
     function Game(x,y,actions,task="copy")
@@ -59,6 +66,7 @@ type Game
         pointers = init_pointers(xtapes,N,task)
         symgold = map(i->get_symgold(xtapes[i],gtapes[i],actions[i],task), 1:N)
         timestep = 1
+        # terminated = falses(N)
 
         new(
             N,xtapes,ytapes,gtapes,yactions,xactions,
@@ -84,22 +92,10 @@ function get_origin(grid,task)
 end
 
 # now only just for copy and reverse tasks
-function move_timestep!(g::Game, actions)
+function move_timestep!(g::Game, actions::Array)
     for k = 1:g.ninstances
         action = actions[k]
-        if action == "mr"
-            g.pointers[k][2] += 1
-        elseif action == "ml"
-            g.pointers[k][2] -= 1
-        elseif action == "<s>"
-            # do nothing
-        elseif action == "up"
-            g.pointers[k][1] -= 1
-        elseif action == "down"
-            g.pointers[k][1] += 1
-        else
-            error("zaa xd $action")
-        end
+        move_timestep!(g, k, action)
     end
     g.timestep += 1
 end
@@ -107,6 +103,23 @@ end
 function move_timestep!(g::Game)
     actions = map(ai->ai[g.timestep], g.next_actions)
     move_timestep!(g,actions)
+end
+
+function move_timestep!(g::Game, instance::Int64, action)
+    k = instance
+    if action == "mr"
+        g.pointers[k][2] += 1
+    elseif action == "ml"
+        g.pointers[k][2] -= 1
+    elseif action == "<s>"
+        # do nothing
+    elseif action == "up"
+        g.pointers[k][1] -= 1
+    elseif action == "down"
+        g.pointers[k][1] += 1
+    else
+        error("invalid action: $action")
+    end
 end
 
 function make_input(g::Game, s2i, a2i)
@@ -199,4 +212,163 @@ function read_symbol(grid, pointer)
         return grid[pointer...]
     end
     return -1
+end
+
+# Environment for Reinforcement Learning
+type Transition
+    # +1 for true symbol output, 0 for otherwise
+    reward
+
+    # environment state - POMDP
+    input_symbol
+    input_action
+    nsteps # remaining steps
+
+    # controller state - e.g. RNN hidden/cell
+    h
+    c
+
+    # next environment state
+    output_symbol
+    output_action
+end
+
+type ReplayMemory
+    capacity
+    memory
+
+    function ReplayMemory(capacity)
+        memory = Transition[]
+        new(capacity, memory)
+    end
+end
+
+function push!(obj::ReplayMemory, t)
+    push!(obj.memory, t)
+    length(obj.memory) > obj.capacity && shift!(obj.memory)
+end
+
+function length(obj::ReplayMemory)
+    return length(obj.memory)
+end
+
+function empty!(obj::ReplayMemory)
+    empty!(obj.memory)
+end
+
+function pop!(obj::ReplayMemory)
+    pop!(obj.memory)
+end
+
+function sample(obj::ReplayMemory, nsamples, nsteps)
+    samples = []
+    indices = randperm(length(obj))[1:min(nsamples,length(obj))]
+    for ind in indices
+        push!(samples, obj.memory[ind:min(ind+nsteps-1,length(obj))])
+    end
+    return samples
+end
+
+# currently I don't have an efficient idea to run episodes parallel
+# I just leave it in this way for simplicity
+function run_episodes!(
+    g::Game, mem, w, h, c, s2i, i2s, a2i, i2a, steps_done; o=Dict())
+    reset!(g)
+    atype = typeof(w[:wcont])
+
+    for k = 1:g.ninstances
+        input_action = g.prev_actions[k][1] # no action input
+        input_symbol = read_symbol(g.input_tapes[k], g.pointers[k])
+        predicted = []
+
+        while true
+            # make one-hot input vector
+            input = zeros(length(s2i)+length(a2i), 1)
+            input[s2i[input_symbol]] = 1
+            input[length(s2i)+a2i[input_action]] = 1
+            input = convert(atype, input)
+
+            # use controller
+            cout, h1, c1 = propagate(w[:wcont], w[:bcont], input, h, c)
+
+            # predict symbol
+            y1pred = predict(w[:wsymb],w[:bsymb], cout)
+            y1pred = indmax(Array(y1pred))
+            push!(predicted, i2s[y1pred])
+
+            # take action
+            action = take_action(w[:wact],w[:bact],cout,steps_done; o=o)
+            action = i2a[action]
+
+            # decide reward, termination, remaining steps
+            reward, done, nsteps = get_reward(g, k, predicted)
+
+            # transition
+            this_transition = Transition(
+                reward,
+                input_symbol,
+                input_action,
+                nsteps,
+                h != nothing ? Array(h) : nothing,
+                c != nothing ? Array(c) : nothing,
+                predicted[end], # output_symbol
+                action)
+
+            # push to replay memory
+            push!(mem, this_transition)
+
+            # move head
+            move_timestep!(g, k, action)
+
+            # change controller state
+            h = h1; c = c1
+
+            # change inputs
+            input_symbol = predicted[end]
+            input_action = action
+
+            # if done, then break
+            done && break
+        end
+
+        # FIXME: when to do steps_done increament?
+        # after each episode or after each step?
+        steps_done += 1
+    end
+
+    return steps_done
+end
+
+function take_action(w, b, s, steps_done; o=Dict())
+    ei = get(o, :epsinit,  EPS_INIT)
+    ef = get(o, :epsfinal, EPS_FINAL)
+    ed = get(o, :epsdecay, EPS_DECAY)
+    et = ef + (ei-ef) * exp(-steps_done/ed)
+
+    if rand() > et
+        # @show w,s
+        s = reshape(s,length(s),1)
+        y = predict(w,b,s)
+        y = Array(y)
+        return indmax(y)
+    else
+        return rand(1:2)
+    end
+end
+
+function get_reward(g::Game, instance, predictions)
+    symgold = g.symgold[instance]
+    symgold = filter(si->si!=NO_SYMBOL, symgold)
+    predictions = filter(pi->pi!=NO_SYMBOL, predictions)
+
+    reward = 0
+    done = false
+    nsteps = length(symgold) - length(predictions)
+    if predictions == symgold[1:length(predictions)]
+        reward = 1
+    else
+        done = true
+    end
+
+    return reward, done, nsteps
 end
