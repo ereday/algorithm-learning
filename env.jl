@@ -298,20 +298,33 @@ function run_episodes!(
             # use controller
             cout, h1, c1 = propagate(w[:wcont], w[:bcont], input, h, c)
 
+            # # predict symbol
+            # y1pred = predict(w[:wsymb],w[:bsymb], cout)
+            # # y0 = maximum(y1pred,1)
+            # # y1 = y1pred .- y0
+            # # y2 = exp(y1)
+            # # y3 = y2 ./ sum(y2)
+            # # y1pred = Array(y3)
+            # # y1pred = cumsum(y1pred) .> rand()
+            # y1pred = indmax(y1pred)
+            # y1pred = rand(1:length(y3))
+
             # predict symbol
-            y1pred = predict(w[:wsymb],w[:bsymb], cout)
-            y1pred = indmax(Array(y1pred))
-            push!(predicted, i2s[y1pred])
+            # symbol = take_action(w[:wsymb],w[:bsymb],cout,steps_done;o=o)
+            symbol = take_action(w[:wsymb],w[:bsymb],cout,steps_done;o=o)
+            symbol = i2s[symbol]
+            push!(predicted, symbol)
 
             # take action
             action = take_action(w[:wact],w[:bact],cout,steps_done; o=o)
             action = i2a[action]
+            steps_done += 1
 
             # decide reward, termination, remaining steps
             reward, done, nsteps = get_reward(g, k, predicted)
 
             # very stupid scenario, terminate episode and start a new one
-            if action == "<s>" && !done
+            if action == "<s>" || done
                 break
             end
 
@@ -326,6 +339,7 @@ function run_episodes!(
                 predicted[end], # output_symbol
                 action,
                 done)
+            # @show this_transition
 
             # push to replay memory
             push!(mem, this_transition)
@@ -346,7 +360,7 @@ function run_episodes!(
 
         # FIXME: when to do steps_done increament?
         # after each episode or after each step?
-        steps_done += 1
+        # steps_done += 1
     end
 
     return steps_done
@@ -365,19 +379,22 @@ function take_action(w, b, s, steps_done; o=Dict())
         y = Array(y)
         return indmax(y)
     else
-        return rand(1:2)
+        return rand(1:size(w,1))
     end
 end
 
 function get_reward(g::Game, instance, predictions)
-    symgold = g.symgold[instance]
-    symgold = filter(si->si!=NO_SYMBOL, symgold)
+    # symgold = g.symgold[instance]
+    # symgold = filter(si->si!=NO_SYMBOL, symgold)
+    last_prediction = predictions[end]
     predictions = filter(pi->pi!=NO_SYMBOL, predictions)
 
     reward = 0
     done = false
-    nsteps = length(symgold) - length(predictions)
-    if predictions == symgold[1:length(predictions)]
+    nsteps = length(g.gold_tapes[instance]) - length(predictions)
+    desired = g.gold_tapes[instance]
+    desired = in(g.task,("copy","reverse","walk")) ? reverse(desired) : desired
+    if predictions == desired[1:length(predictions)] && last_prediction != NO_SYMBOL
         reward = 1
     else
         done = true

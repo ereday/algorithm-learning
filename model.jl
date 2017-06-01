@@ -163,6 +163,9 @@ rlgradient = grad(rloss)
 # compute TD targets for objective
 function compute_targets(samples, w, discount, nsteps, s2i, a2i)
     # reward calculations
+    if discount < 0
+        discount = 1
+    end
     discounts = map(i->discount^i, 0:nsteps)
     targets = zeros(1, length(samples))
     for k = 1:length(samples)
