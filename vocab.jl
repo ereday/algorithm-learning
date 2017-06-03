@@ -1,12 +1,12 @@
 const COPY_SYMBOLS = (-1:9...)
 const REVERSE_SYMBOLS = (-2:9...)
 const WALK_SYMBOLS = (-4:9...)
-const SYMBOLS = (-1:9...)
-# const NO_OP = -1
+const SYMBOLS = (0:9...)
 const NO_SYMBOL = -1
 
-const TAPE_ACTIONS = ("mr","ml","<s>")
-const GRID_ACTIONS = ("mr","ml","<s>")
+const TAPE_ACTIONS = ("mr","ml")
+const GRID_ACTIONS = ("mr","ml")
+const WRITE_ACTIONS = ("write","not-write")
 
 function get_symbols(task)
     if in(task,("copy","reverse","walk"))
@@ -16,10 +16,14 @@ function get_symbols(task)
 end
 
 function get_actions(task)
+    actions = nothing
     if in(task,("copy","reverse"))
-        return TAPE_ACTIONS
+        actions = TAPE_ACTIONS
+    else
+        actions = GRID_ACTIONS
     end
-    return GRID_ACTIONS
+    actions = mapreduce(wa->map(ai->(ai,wa), actions), vcat, WRITE_ACTIONS)
+    return [actions..., ("<s>","not-write")]
 end
 
 function initvocab(symbols)

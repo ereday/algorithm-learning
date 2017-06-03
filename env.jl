@@ -4,78 +4,53 @@ import Base: empty!
 import Base: pop!
 import Base: getindex
 
-
-# <s> token stands for start in input, stop in output
-
 type Game
-    ninstances
-    input_tapes
-    output_tapes
-    gold_tapes
-    next_actions
-    prev_actions
+    input_tape
+    output_tape
+    gold_tape
     task
-    pointers
-    symgold
+    head
     timestep
-    # terminated
-    # mask
+    prev_actions
+    done
 
     function Game(x,y,actions,task="copy")
-        N = length(x) # ninstances
-
-        # input tapes
-        xtapes = []
+        # make input tpae
+        input_tape = nothing
         if in(task, ("copy","reverse"))
-            for xi0 in x
-                xi1 = convert(Array{Int64}, xi0)
-                xi2 = reshape(xi1, 1, length(xi1))
-                push!(xtapes, xi2)
-            end
+            x = convert(Array{Int64}, x)
+            input_tape = reshape(x, 1, length(x))
         elseif in(task, ("add","mul","radd"))
-            for xi in x
-                push!(xtapes, make_grid(xi))
-            end
+            input_tape = make_grid(x)
         elseif task == "walk"
-            # error("walk is not implemented yet")
-            for xi in x
-                push!(xtapes, xi)
-            end
+            input_tape = x
         end
 
-        # output tapes
-        ytapes = map(i->Any[], 1:N)
+        # make output tape
+        output_tape = Int64[]
 
-        # gold tapes
-        gtapes = []
+        # make gold tape
+        gold_tape = nothing
         if in(task, ("copy","reverse","walk"))
-            for yi in y
-                push!(gtapes, yi)
-            end
+            gold_tape = y
         else
-            for yi in y
-                push!(gtapes, digits(yi))
-            end
+            gold_tape = digits(y)
         end
 
-        # actions
-        xactions = map(ai->["<s>", ai...], actions)
-        yactions = map(ai->[ai..., "<s>"], actions)
+        # previous action
+        prev_actions = ["<s>"]
 
-        # pointer <=> head
-        pointers = init_pointers(xtapes,N,task)
-        symgold = map(i->get_symgold(xtapes[i],gtapes[i],actions[i],task), 1:N)
+        # head
+        head = init_head(input_tape,task)
         timestep = 1
-        # terminated = falses(N)
 
-        new(
-            N,xtapes,ytapes,gtapes,yactions,xactions,
-            task,pointers,symgold,timestep)
+        new(input_tape, output_tape, gold_tape,
+            task, head, timestep, prev_actions, done)
     end
 end
 
-function init_pointers(grids,ninstances,task)
-    map(gi->get_origin(gi,task), grids)
+function init_head(grid,task)
+    return get_origin(grid,task)
 end
 
 function get_origin(grid,task)
@@ -91,84 +66,31 @@ function get_origin(grid,task)
     error("invalid task: $task")
 end
 
-# now only just for copy and reverse tasks
-function move_timestep!(g::Game, actions::Array)
-    for k = 1:g.ninstances
-        action = actions[k]
-        move_timestep!(g, k, action)
-    end
+function move_timestep!(g::Game, symbol, action)
+    symbol != NO_SYMBOL && write!(g, symbol)
+    move!(g, action)
     g.timestep += 1
+    push!(g.prev_actions, action)
 end
 
-function move_timestep!(g::Game)
-    actions = map(ai->ai[g.timestep], g.next_actions)
-    move_timestep!(g,actions)
-end
-
-function move_timestep!(g::Game, instance::Int64, action)
-    k = instance
+function move!(g::Game, action)
     if action == "mr"
-        g.pointers[k][2] += 1
+        g.head[2] += 1
     elseif action == "ml"
-        g.pointers[k][2] -= 1
+        g.head[2] -= 1
     elseif action == "<s>"
-        # do nothing
+        g.done = true
     elseif action == "up"
-        g.pointers[k][1] -= 1
+        g.head[1] -= 1
     elseif action == "down"
-        g.pointers[k][1] += 1
+        g.head[1] += 1
     else
         error("invalid action: $action")
     end
 end
 
-function make_input(g::Game, s2i, a2i)
-    x1  = zeros(Float32, length(s2i), g.ninstances)
-
-    # x1 => onehots, x11 => values, x12 => decoded (actions)
-    x11 = map(i->read_symbol(g.input_tapes[i],g.pointers[i]), 1:g.ninstances)
-    x12 = map(v->s2i[v], x11)
-    for k = 1:length(x12); x1[x12[k],k] = 1; end
-
-    # x2 => onehots, x21 => values, x22 => decoded (actions)
-    x2  = zeros(Float32, length(a2i), g.ninstances)
-    x21 = map(i->g.prev_actions[i][g.timestep], 1:g.ninstances)
-    x22 = map(v->a2i[v], x21)
-    for k = 1:length(x22); x2[x22[k],k] = 1; end
-
-    return x1,x2
-end
-
-function make_inputs(g::Game, s2i, a2i)
-    reset!(g)
-    inputs = []
-    for k = 1:length(g.prev_actions[1])
-        push!(inputs, make_input(g,s2i,a2i))
-        move_timestep!(g)
-    end
-    reset!(g)
-    return inputs
-end
-
-function make_output(g::Game, s2i, a2i)
-    y10 = map(i->g.symgold[i][g.timestep], 1:g.ninstances)
-    y11 = map(yi->s2i[yi], y10)
-
-    y20 = map(i->g.next_actions[i][g.timestep], 1:g.ninstances)
-    y21 = map(yi->a2i[yi], y20)
-
-    return y11, y21
-end
-
-function make_outputs(g, s2i, a2i)
-    reset!(g)
-    outputs = []
-    for k = 1:length(g.next_actions[1])
-        push!(outputs, make_output(g,s2i,a2i))
-        move_timestep!(g)
-    end
-    reset!(g)
-    return outputs
+function write!(g::Game, symbol)
+    (g.task in ("copy","reverse","walk")?push!:unshift!)(g.gold_tape, symbol)
 end
 
 function make_grid(x)
@@ -185,53 +107,27 @@ function make_grid(x)
 end
 
 function reset!(g::Game)
+    g.prev_actions = ["<s>"]
+    g.head = init_head(g.input_tape, g.task)
     g.timestep = 1
-    g.pointers = init_pointers(g.input_tapes,g.ninstances,g.task)
 end
 
-# x: input tape, y: output tape, a: actions
-function get_symgold(x,y,a,task)
-    if task == "copy"
-        return [y..., -1]
-    elseif task == "reverse"
-        return [-1, map(yi->-1, y)..., y..., -1]
-    elseif task == "walk"
-        return [map(i->-1, 1:size(x,2))..., y..., -1]
-    elseif task == "add"
-        x1digits = size(x,2)
-        y1digits = length(y)
-        symgold = mapreduce(i->[-1,y[i]], vcat, 1:x1digits)
-        return vcat(symgold, [-1, (y1digits>x1digits?y[end]:-1)])
-    else
-        error("$task is not implemented yet")
-    end
-end
-
-function read_symbol(grid, pointer)
-    if 0 < pointer[1] <= size(grid,1) && 0 < pointer[2] <= size(grid,2)
-        return grid[pointer...]
+function read_symbol(grid, head)
+    if 0 < head[1] <= size(grid,1) && 0 < head[2] <= size(grid,2)
+        return grid[head...]
     end
     return -1
 end
 
-# Environment for Reinforcement Learning
+# transitions
 type Transition
-    # +1 for true symbol output, 0 for otherwise
-    reward
-
-    # environment state - POMDP
-    input_symbol
-    input_action
+    reward # +1 for true symbol output, 0 for otherwise
+    input # controller input (read_symbol+prev_action)
     nsteps # remaining steps
-
-    # controller state - e.g. RNN hidden/cell
-    h
-    c
-
-    # next environment state
-    output_symbol
-    output_action
-    done
+    h; c # controller states
+    action # action has been taken
+    symbol # symbol written to output tape
+    done # last step or not
 end
 
 type ReplayMemory
@@ -384,8 +280,6 @@ function take_action(w, b, s, steps_done; o=Dict())
 end
 
 function get_reward(g::Game, instance, predictions)
-    # symgold = g.symgold[instance]
-    # symgold = filter(si->si!=NO_SYMBOL, symgold)
     last_prediction = predictions[end]
     predictions = filter(pi->pi!=NO_SYMBOL, predictions)
 
@@ -401,4 +295,73 @@ function get_reward(g::Game, instance, predictions)
     end
 
     return reward, done, nsteps
+end
+
+# deprecated old input functions, let me keep them for a while
+
+# x: input tape, y: output tape, a: actions
+function get_symgold(x,y,a,task)
+    if task == "copy"
+        return [y..., -1]
+    elseif task == "reverse"
+        return [-1, map(yi->-1, y)..., y..., -1]
+    elseif task == "walk"
+        return [map(i->-1, 1:size(x,2))..., y..., -1]
+    elseif task == "add"
+        x1digits = size(x,2)
+        y1digits = length(y)
+        symgold = mapreduce(i->[-1,y[i]], vcat, 1:x1digits)
+        return vcat(symgold, [-1, (y1digits>x1digits?y[end]:-1)])
+    else
+        error("$task is not implemented yet")
+    end
+end
+
+function make_input(g::Game, s2i, a2i)
+    x1  = zeros(Float32, length(s2i), g.ninstances)
+
+    # x1 => onehots, x11 => values, x12 => decoded (actions)
+    x11 = map(i->read_symbol(g.input_tapes[i],g.pointers[i]), 1:g.ninstances)
+    x12 = map(v->s2i[v], x11)
+    for k = 1:length(x12); x1[x12[k],k] = 1; end
+
+    # x2 => onehots, x21 => values, x22 => decoded (actions)
+    x2  = zeros(Float32, length(a2i), g.ninstances)
+    x21 = map(i->g.prev_actions[i][g.timestep], 1:g.ninstances)
+    x22 = map(v->a2i[v], x21)
+    for k = 1:length(x22); x2[x22[k],k] = 1; end
+
+    return x1,x2
+end
+
+function make_inputs(g::Game, s2i, a2i)
+    reset!(g)
+    inputs = []
+    for k = 1:length(g.prev_actions[1])
+        push!(inputs, make_input(g,s2i,a2i))
+        move_timestep!(g)
+    end
+    reset!(g)
+    return inputs
+end
+
+function make_output(g::Game, s2i, a2i)
+    y10 = map(i->g.symgold[i][g.timestep], 1:g.ninstances)
+    y11 = map(yi->s2i[yi], y10)
+
+    y20 = map(i->g.next_actions[i][g.timestep], 1:g.ninstances)
+    y21 = map(yi->a2i[yi], y20)
+
+    return y11, y21
+end
+
+function make_outputs(g, s2i, a2i)
+    reset!(g)
+    outputs = []
+    for k = 1:length(g.next_actions[1])
+        push!(outputs, make_output(g,s2i,a2i))
+        move_timestep!(g)
+    end
+    reset!(g)
+    return outputs
 end
