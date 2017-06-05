@@ -1,9 +1,3 @@
-import Base: push!
-import Base: length
-import Base: empty!
-import Base: pop!
-import Base: getindex
-
 type Game
     input_tape
     output_tape
@@ -14,7 +8,7 @@ type Game
     prev_actions
     done
 
-    function Game(x,y,actions,task="copy")
+    function Game(x,y,task="copy")
         # make input tpae
         input_tape = nothing
         if in(task, ("copy","reverse"))
@@ -38,7 +32,7 @@ type Game
         end
 
         # previous action
-        prev_actions = ["<s>"]
+        prev_actions = [("<s>", "not-write")]
 
         # head
         head = init_head(input_tape,task)
@@ -136,15 +130,21 @@ function take_action(w, b, s, steps_done; o=Dict())
     ed = get(o, :epsdecay, EPS_DECAY)
     et = ef + (ei-ef) * exp(-steps_done/ed)
 
+    # I think they did not use GLIE, they just unroll
     if rand() > et
         # @show w,s
-        s = reshape(s,length(s),1)
+        s = ndims(s) == 1 ? reshape(s,length(s),1) : s
         y = predict(w,b,s)
-        y = Array(y)
-        return indmax(y)
+        return mapslices(indmax, Array(y), 1)
     else
-        return rand(1:size(w,1))
+        return rand(1:size(w,1), size(s)...)
     end
+end
+
+function take_action(w,b,s)
+    s = ndims(s) == 1 ? reshape(s, length(s), 1) : s
+    y = predict(w,b,s)
+    return mapslices(indmax, Array(y), 1)
 end
 
 function get_reward(g::Game, instance, predictions)
