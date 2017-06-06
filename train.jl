@@ -129,40 +129,65 @@ function validate(w,h,c,games; o=Dict())
 end
 
 function run_episodes!(
-    w,h,c,games,train,supervised=false; o=Dict(), opts=Dict(), actions=[])
+    w,games,train,supervised=false; o=Dict(), opts=Dict(), actions=[])
+
+    # init state parameters
+    atype = get(o, :atype, typeof(w[:wcont]))
+    hidden = size(w[:wcont], 1)
+    controller = get(o, :controller, "lstm")
 
     if train && supervised
         # (1) prepare input data
+        inputs, outputs, masks = make_data(games, s2i, a2i)
 
-        # (2) prepare output data
+        # (2) init controller states
+        h, c = initstates(atype, hidden, length(games), controller)
 
-        # (3) prepare mask
+        # (3) train network
+        batchloss = sltrain!(w,h,c,inputs,outputs,masks,opt; o=o)
 
-        # (4) get gradients
-
-        # (5) update weights
-
-        # (6) all done
+        # (4) return batchloss
+        return batchloss
     end
 
     # needed by qwatkins
     histories = []
     for game in games; push!(histories, []); end
 
-    # run episodes for both rl and validation
+    # run episodes
     ncorrect = 0
     done = false
     iter = 1
-    while !done
-        # (1) prepare input data
+    for (i,game) in enumerate(games)
+        h, c = initstates(atype, hidden, 1, controller)
+        while !game.done
+            # (1) prepare input data
+            input = make_input(game)
 
-        # (2) propage controller
+            # (2) propage controller
+            cout, h, c = propagate(w[:wcont],w[:bcont],input,h,c)
 
-        # (3) take action
+            # (3) take action
+            next_action = first(take_action(w[:wact],w[:bact],cout))
+            next_action = i2a[next_action]
+            move_action, write_action = next_action
 
-        # (4) predict symbol
+            # (4) predict symbol
+            symbol = NO_SYMBOL
+            if write_action == WRITE
+                symbol = predict(w[:wsymb],w[:bsymb],cout)
+                symbol = mapslices(indmax, Array(symbol), 1)[1]
+                symbol = i2s[symbol]
+                move_timestep!(game, symbol, move_action)
+            end
 
-        # (5) add transition to history if phase is RL train
+            # (5) add transition to history if phase is RL train
+            if train
+                reward = get_reward(game)
+                input = input
+                transition = Transition
+            end
+        end
     end
 
     # q-watkins training if phase is RL train

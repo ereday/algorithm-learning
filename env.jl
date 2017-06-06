@@ -32,7 +32,7 @@ type Game
         end
 
         # previous action
-        prev_actions = [("<s>", "not-write")]
+        prev_actions = [STOP_ACTION]
 
         # head
         head = init_head(input_tape,task)
@@ -60,11 +60,13 @@ function get_origin(grid,task)
     error("invalid task: $task")
 end
 
-function move_timestep!(g::Game, symbol, action)
-    symbol != NO_SYMBOL && write!(g, symbol)
-    move!(g, action)
+function move_timestep!(g::Game, symbol, move_action)
+    write_action = symbol == NO_SYMBOL ? NOT_WRITE : WRITE
+    write_action == WRITE && write!(g, symbol)
+    move!(g, move_action)
     g.timestep += 1
-    push!(g.prev_actions, action)
+    push!(g.prev_actions, (move_action, write_action))
+    g.done = is_done(g)
 end
 
 function move!(g::Game, action)
@@ -85,6 +87,11 @@ end
 
 function write!(g::Game, symbol)
     (g.task in ("copy","reverse","walk")?push!:unshift!)(g.gold_tape, symbol)
+end
+
+# FIXME: when it is done? right thing is to check the last action is <s> or not
+function is_done(g::Game)
+    return output_tape == gold_tape
 end
 
 function make_grid(x)
@@ -147,22 +154,17 @@ function take_action(w,b,s)
     return mapslices(indmax, Array(y), 1)
 end
 
-function get_reward(g::Game, instance, predictions)
-    last_prediction = predictions[end]
-    predictions = filter(pi->pi!=NO_SYMBOL, predictions)
-
-    reward = 0
-    done = false
-    nsteps = length(g.gold_tapes[instance]) - length(predictions)
-    desired = g.gold_tapes[instance]
-    desired = in(g.task,("copy","reverse","walk")) ? reverse(desired) : desired
-    if predictions == desired[1:length(predictions)] && last_prediction != NO_SYMBOL
-        reward = 1
+function get_reward(g::Game)
+    if in(g.task, ("copy","reverse","walk"))
+        is_desired = g.output_tape == g.gold_tape[1:length(g.output_tape)]
     else
-        done = true
+        is_desired = g.output_tape == g.gold_tape[end-length(g.output_tape):end]
     end
+    return Int(is_desired)
+end
 
-    return reward, done, nsteps
+function get_remaining_steps(g::Game)
+    return length(g.gold_tape) - length(g.output_tape)
 end
 
 # deprecated old input functions, let me keep them for a while

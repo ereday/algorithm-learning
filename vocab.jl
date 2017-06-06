@@ -3,11 +3,13 @@ const REVERSE_SYMBOLS = (-2:9...)
 const WALK_SYMBOLS = (-4:9...)
 const SYMBOLS = (0:9...)
 const NO_SYMBOL = -1
+const WRITE = "write"
+const NOT_WRITE = "not-write"
 
 const TAPE_ACTIONS = ("mr","ml")
 const GRID_ACTIONS = ("mr","ml")
-const WRITE_ACTIONS = ("write","not-write")
-const STOP_ACTION = ("<s>","not-write")
+const WRITE_ACTIONS = (WRITE, NOT_WRITE)
+const STOP_ACTION = ("<s>", NOT_WRITE)
 
 function get_symbols(task)
     if in(task,("copy","reverse","walk"))
