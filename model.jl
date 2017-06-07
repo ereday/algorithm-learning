@@ -41,46 +41,55 @@ function predict(w,b,x)
     return w * x .+ b
 end
 
-function logprob(output, ypred)
+function logprob(output, ypred, mask=nothing)
     nrows,ncols = size(ypred)
     index = output + nrows*(0:(length(output)-1))
+    index = mask == nothing ? index : index[mask]
     o1 = logp(ypred,1)
+    # @show index
     o2 = o1[index]
     o3 = sum(o2)
     return o3
 end
 
-# x1,y1 => input/output for symbols
-# x2,y2 => input/output for actions
-# weighted loss for soft symbol/action distributions
-function sloss(w,x,y,h,c; values=[])
+# loss function for supervised learning
+# x: controller input, y: controller output (action+symbol)
+# m: masks for loss, h/c: controller states
+function sloss(w,x,y,m,h,c; values=[])
     batchsize = size(x[1][1],2)
     atype = typeof(AutoGrad.getval(w[:wcont]))
 
     lossval1 = lossval2 = 0
-    for (xi,yi) in zip(x,y)
+    for (i,(xi,yi,mi)) in enumerate(zip(x,y,m))
         # concat previous action and symbol from input tape
-        input = convert(atype,vcat(xi...)) # TODO: CPU/GPU comparison
+        input = convert(atype,xi) # TODO: CPU/GPU comparison
 
         # use the controller
         cout,h,c = propagate(w[:wcont],w[:bcont],input,h,c)
 
         # make predictions
-        y1pred = predict(w[:wsymb],w[:bsymb],cout)
-        y2pred = predict(w[:wact],w[:bact],cout)
+        sympred = predict(w[:wsymb],w[:bsymb],cout)
+        actpred = predict(w[:wact],w[:bact],cout)
 
         # log probabilities
-        lossval1 += logprob(yi[1],y1pred)
-        lossval2 += logprob(yi[2],y2pred)
+        symgold, actgold = yi[1], yi[2]
+        lossval1 += logprob(symgold,sympred,mi)
+        lossval2 += logprob(actgold,actpred)
     end
 
     # combined loss
-    lossval = 0.5*(lossval1+lossval2)
-    push!(values, AutoGrad.getval(-lossval))
-    return -lossval/(batchsize*length(x))
+    lossval = -0.5*(lossval1+lossval2)
+    push!(values, AutoGrad.getval(lossval))
+    push!(values, batchsize*length(x))
+
+    # return -lossval/(batchsize*length(x))
+    return lossval
 end
 
-slgradient = grad(sloss)
+slgrad = grad(sloss)
+
+function rloss()
+end
 
 function initweights(
     atype,units,nsymbols,nactions,
@@ -122,7 +131,6 @@ function initopts(w,optim)
     end
     return opts
 end
-
 
 # Reinforcement Learning stuff
 # xs => controller inputs (concat prev_action and read_symbol)
@@ -223,37 +231,37 @@ function compute_targets(samples, w, discount, nsteps, s2i, a2i)
     return targets
 end
 
-function make_batch(
-    obj::ReplayMemory, w, discount, nsteps, s2i, a2i, batchsize)
-    samples = sample(obj, batchsize, nsteps)
-    targets = compute_targets(samples, w, discount, nsteps, s2i, a2i)
-    atype = typeof(targets)
+# function make_batch(
+#     obj::ReplayMemory, w, discount, nsteps, s2i, a2i, batchsize)
+#     samples = sample(obj, batchsize, nsteps)
+#     targets = compute_targets(samples, w, discount, nsteps, s2i, a2i)
+#     atype = typeof(targets)
 
-    # xs <-> inputs (read symbol+previous action) - onehots
-    xs = zeros(length(s2i)+length(a2i),length(samples))
-    for (i,sample) in enumerate(samples)
-        xs[s2i[sample[1].input_symbol],i] = 1
-        xs[length(s2i)+a2i[sample[1].input_action],i] = 1
-    end
-    xs = convert(atype, xs)
+#     # xs <-> inputs (read symbol+previous action) - onehots
+#     xs = zeros(length(s2i)+length(a2i),length(samples))
+#     for (i,sample) in enumerate(samples)
+#         xs[s2i[sample[1].input_symbol],i] = 1
+#         xs[length(s2i)+a2i[sample[1].input_action],i] = 1
+#     end
+#     xs = convert(atype, xs)
 
-    # ys <-> output symbols
-    # as <-> actions
-    ys = map(s->s[1].output_symbol, samples); ys = map(yi->s2i[yi],ys)
-    as = map(s->s[1].output_action, samples); as = map(ai->a2i[ai],as)
+#     # ys <-> output symbols
+#     # as <-> actions
+#     ys = map(s->s[1].output_symbol, samples); ys = map(yi->s2i[yi],ys)
+#     as = map(s->s[1].output_action, samples); as = map(ai->a2i[ai],as)
 
-    h = c = nothing
-    if samples[1][1].h != nothing
-        h = mapreduce(s->s[1].h, hcat, samples)
-        h = convert(atype, h)
-    end
-    if samples[1][1].c != nothing
-        c = mapreduce(s->s[1].c, hcat, samples)
-        c = convert(atype, c)
-    end
-    vs = map(si->si[1].nsteps, samples)
-    vs = reshape(vs, 1, length(vs))
-    vs = convert(atype, vs)
+#     h = c = nothing
+#     if samples[1][1].h != nothing
+#         h = mapreduce(s->s[1].h, hcat, samples)
+#         h = convert(atype, h)
+#     end
+#     if samples[1][1].c != nothing
+#         c = mapreduce(s->s[1].c, hcat, samples)
+#         c = convert(atype, c)
+#     end
+#     vs = map(si->si[1].nsteps, samples)
+#     vs = reshape(vs, 1, length(vs))
+#     vs = convert(atype, vs)
 
-    return targets, xs, ys, as, h, c, vs
-end
+#     return targets, xs, ys, as, h, c, vs
+# end

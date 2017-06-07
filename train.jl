@@ -1,6 +1,7 @@
 using Knet
 using ArgParse
 using JLD
+using Combinatorics
 
 include("env.jl")
 include("model.jl")
@@ -66,7 +67,6 @@ function main(args)
 
     # C => complexity
     # c => controller cell
-    validate = !o[:supervised] ? rlvalidate : slvalidate
     steps_done = 0
     for C = o[:start]:o[:step]:o[:end]
         # prepare validation data
@@ -91,18 +91,16 @@ function main(args)
                 push!(actions, [action..., STOP_ACTION])
             end
 
-            # init controller state
-            h,c = initstates(
-                o[:atype],o[:units],o[:batchsize],o[:controller])
-
             # train network while running episodes
-            this_loss = train!(w,h,c,games,actions,opts,o[:supervised]; o=o)
+            this_loss = train!(
+                w,games,s2i,i2s,a2i,i2a,actions,opts,o[:supervised]; o=o)
+            lossval = update_lossval(lossval, this_loss, iter)
 
             # validate network by running episodes
-            accuracy = validate(w,h,c,games;o=o)
+            accuracy = validate(w,valid,s2i,i2s,a2i,i2a;o=o)
 
             lossval = update_lossval(lossval,this_loss,iter)
-            println("(iter:$iter,accuracy:$accuracy)")
+            println("(iter:$iter,loss:$lossval,accuracy:$accuracy)")
 
             if accuracy >= o[:threshold]
                 println("$C converged in $iter iterations")
@@ -113,38 +111,49 @@ function main(args)
                      "task", o[:task],
                      "complexity", C)
             end
+
+            iter += 1
         end # while true
     end # one complexity step
 end
 
-function train!(w,h,c,games,actions,opts,supervised=false; o=Dict())
+# train while running episodes
+function train!(w,games,s2i,i2s,a2i,i2a,actions,opts,supervised; o=Dict())
     train = true
-    run_episodes!(w,h,c,games,train,supervised;o=o,opts=opts,actions=actions)
+    run_episodes!(w,games,s2i,i2s,a2i,i2a,train,supervised;
+                  o=o,opts=opts,actions=actions)
 end
 
-function validate(w,h,c,games; o=Dict())
+# validate games
+function validate(w,games,s2i,i2s,a2i,i2a; o=Dict())
     train = supervised = false
-    accuracy = run_episodes!(w,h,c,games,train,supervised; o=o)
+    accuracy = run_episodes!(w,games,s2i,i2s,a2i,i2a,train,supervised; o=o)
     return accuracy
 end
 
-function run_episodes!(
-    w,games,train,supervised=false; o=Dict(), opts=Dict(), actions=[])
-
+# this is skeleton for all methods
+function run_episodes!(w,games,s2i,i2s,a2i,i2a,train,supervised;
+                       o=Dict(), opts=Dict(), actions=[])
     # init state parameters
     atype = get(o, :atype, typeof(w[:wcont]))
     hidden = size(w[:wcont], 1)
     controller = get(o, :controller, "lstm")
 
+    # unrolled
+    nsteps = get(o, :nsteps, 20)
+
+    # supervised learning
     if train && supervised
+        isempty(actions) && error("actions must not be empty for supervision")
+
         # (1) prepare input data
-        inputs, outputs, masks = make_data(games, s2i, a2i)
+        inputs, outputs, masks = make_data(games,s2i,a2i,actions)
 
         # (2) init controller states
         h, c = initstates(atype, hidden, length(games), controller)
 
         # (3) train network
-        batchloss = sltrain!(w,h,c,inputs,outputs,masks,opt; o=o)
+        batchloss = sltrain!(w,h,c,inputs,outputs,masks,opts; o=o)
 
         # (4) return batchloss
         return batchloss
@@ -154,18 +163,30 @@ function run_episodes!(
     histories = []
     for game in games; push!(histories, []); end
 
-    # run episodes
+    # run episodes - for both validation and q-learning
     ncorrect = 0
-    done = false
+    is_done = false
     iter = 1
+
+    cumulative_reward = 0
     for (i,game) in enumerate(games)
+        episode_reward = 0
         h, c = initstates(atype, hidden, 1, controller)
-        while !game.done
+        while !game.is_done
             # (1) prepare input data
-            input = make_input(game)
+            input_symbol = read_symbol(game)
+            input_action = game.prev_actions[end]
+            input = zeros(Cuchar, length(s2i)+length(a2i), 1)
+            input[s2i[input_symbol],1] = 1
+            input[length(s2i)+a2i[input_action],1] = 1
 
             # (2) propage controller
-            cout, h, c = propagate(w[:wcont],w[:bcont],input,h,c)
+            prev_h = prev_c = nothing
+            if train
+                prev_h = Array(h)
+                prev_c = Array(c)
+            end
+            cout, h, c = propagate(w[:wcont],w[:bcont],convert(atype,input),h,c)
 
             # (3) take action
             next_action = first(take_action(w[:wact],w[:bact],cout))
@@ -181,18 +202,87 @@ function run_episodes!(
                 move_timestep!(game, symbol, move_action)
             end
 
+            reward = get_reward(game)
+            episode_reward += reward
+
             # (5) add transition to history if phase is RL train
             if train
-                reward = get_reward(game)
-                input = input
-                transition = Transition
+                remaining_steps = get_remaining_steps(game)
+
+                # new transition
+                transition = Transition(
+                    reward,
+                    input_symbol,
+                    input_action,
+                    remaining_steps,
+                    prev_h, prev_c,
+                    next_action,
+                    symbol,
+                    game.is_done
+                )
+
+                # push it do history
+                push!(histories[i], transition)
             end
         end
+
+        cumulative_reward += episode_reward
     end
 
     # q-watkins training if phase is RL train
 
+    for (i,game) in enumerate(games)
+        reset!(game)
+    end
+
     return ncorrect/length(games)
+end
+
+function sltrain!(w,h,c,inputs,outputs,masks,opt; o=Dict())
+    dw = similar(w)
+    for k in keys(w); dw[k] = similar(w[k]); fill!(dw[k], 0); end
+
+    total = num_samples = 0
+    maxlen = get(o, :maxlen, 50)
+    for i = 1:maxlen:length(inputs)
+        lower = i; upper = min(i+maxlen-1,length(inputs))
+        x = inputs[lower:upper]
+        y = outputs[lower:upper]
+        m = masks[lower:upper]
+
+        values = []
+        gloss = slgrad(w,x,y,m,h,c; values=values)
+
+        # track loss and training sample values
+        total += values[1]; num_samples += values[2]
+
+        # accumulate gradients
+        for k in keys(dw); dw[k] += gloss[k]; end
+
+        # unbox states
+        h = AutoGrad.getval(h)
+        c = AutoGrad.getval(c)
+    end
+
+    # clip with num_samples
+    for k in keys(dw); dw[k] = dw[k]/num_samples; end
+    # FIXME: try a different thing in here
+
+    # update weights
+    update!(w,dw,opt)
+
+    return total/num_samples
+end
+
+function rltrain!(w,batches,opt; o=Dict())
+    # dw = similar(w)
+    # for k in keys(w); dw[k] = similar(w[k]); fill!(dw, 0); end
+
+    # total = num_samples = 0
+    # batches = make_batches(...)
+    # for batch in batches
+
+    # end
 end
 
 function update_lossval(lossval,batchloss,iter)

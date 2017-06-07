@@ -6,7 +6,7 @@ type Game
     head
     timestep
     prev_actions
-    done
+    is_done
 
     function Game(x,y,task="copy")
         # make input tpae
@@ -39,7 +39,7 @@ type Game
         timestep = 1
 
         new(input_tape, output_tape, gold_tape,
-            task, head, timestep, prev_actions, done)
+            task, head, timestep, prev_actions, false)
     end
 end
 
@@ -66,7 +66,7 @@ function move_timestep!(g::Game, symbol, move_action)
     move!(g, move_action)
     g.timestep += 1
     push!(g.prev_actions, (move_action, write_action))
-    g.done = is_done(g)
+    g.is_done = is_done(g)
 end
 
 function move!(g::Game, action)
@@ -75,7 +75,7 @@ function move!(g::Game, action)
     elseif action == "ml"
         g.head[2] -= 1
     elseif action == "<s>"
-        g.done = true
+        g.is_done = true
     elseif action == "up"
         g.head[1] -= 1
     elseif action == "down"
@@ -86,12 +86,20 @@ function move!(g::Game, action)
 end
 
 function write!(g::Game, symbol)
-    (g.task in ("copy","reverse","walk")?push!:unshift!)(g.gold_tape, symbol)
+    (g.task in ("copy","reverse","walk")?push!:unshift!)(g.output_tape, symbol)
 end
 
 # FIXME: when it is done? right thing is to check the last action is <s> or not
 function is_done(g::Game)
-    return output_tape == gold_tape
+    len = length(g.output_tape)
+    len > length(g.gold_tape) && return true
+    gold = nothing
+    if g.task in ("copy","reverse","walk")
+        gold = g.gold_tape[1:len]
+    else
+        gold = g.gold_tape[end-length(len):end]
+    end
+    return g.output_tape == gold
 end
 
 function make_grid(x)
@@ -120,15 +128,20 @@ function read_symbol(grid, head)
     return -1
 end
 
+function read_symbol(g::Game)
+    return read_symbol(g.input_tape, g.head)
+end
+
 # transitions
 type Transition
     reward # +1 for true symbol output, 0 for otherwise
-    input # controller input (read_symbol+prev_action)
+    input_symbol # read symbol - controller input
+    prev_action # previous action - controller input
     nsteps # remaining steps
     h; c # controller states
     action # action has been taken
     symbol # symbol written to output tape
-    done # last step or not
+    is_done # last step or not
 end
 
 function take_action(w, b, s, steps_done; o=Dict())
@@ -155,6 +168,7 @@ function take_action(w,b,s)
 end
 
 function get_reward(g::Game)
+    length(g.output_tape) > length(g.gold_tape) && return 0
     if in(g.task, ("copy","reverse","walk"))
         is_desired = g.output_tape == g.gold_tape[1:length(g.output_tape)]
     else
@@ -185,6 +199,51 @@ function get_symgold(x,y,a,task)
     else
         error("$task is not implemented yet")
     end
+end
+
+function make_data(games,s2i,a2i,actions)
+    is_done = false
+    inputs, outputs, masks = [], [], []
+    while !is_done
+        input = zeros(Cuchar, length(s2i)+length(a2i), length(games))
+        mask = falses(1, length(games))
+        symgold = NO_SYMBOL*ones(Int64, length(games))
+        actgold = length(a2i)*ones(Int64, length(games))
+
+        for (i,game) in enumerate(games)
+            input_symbol = read_symbol(game.input_tape, game.head)
+            input[s2i[input_symbol],i] = 1
+            input[length(s2i)+a2i[game.prev_actions[end]],i] = 1
+
+            move_action, write_action = actions[i][game.timestep]
+            y = nothing
+            if write_action == WRITE
+                mask[1,i] = 1
+                if game.task in ("copy","reverse","walk")
+                    y = game.gold_tape[length(game.output_tape)+1]
+                else
+                    y = game.gold_tape[end-length(game.output_tape)]
+                end
+                symgold[i] = s2i[y]
+            end
+            actgold[i] = a2i[(move_action,write_action)]
+            move_timestep!(game,y,move_action)
+            # if move_action == "<s>"
+            #     @show game.gold_tape
+            #     @show game.output_tape
+            # end
+            game.is_done && continue
+        end
+
+        push!(inputs, input)
+        push!(outputs, (symgold,actgold))
+        push!(masks, mask)
+
+        is_done = mapreduce(g->g.is_done, (x,y)->x && y, games)
+    end
+
+    map!(g->reset!(g), games)
+    return inputs,outputs,masks
 end
 
 function make_input(g::Game, s2i, a2i)

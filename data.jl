@@ -36,7 +36,8 @@ function copy_data(seqlen)
     data = Any[rand(0:9) for i=1:seqlen]
     actions = [goldacts[:moveright] for i =1:seqlen]
     ygold = data
-    return (data, ygold, actions) # x,y,actions
+    actions = map(ai->(ai,WRITE), actions)
+    return (data, ygold, actions)
 end
 
 

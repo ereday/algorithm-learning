@@ -25,13 +25,17 @@ function get_actions(task)
     else
         actions = GRID_ACTIONS
     end
-    actions = mapreduce(wa->map(ai->(ai,wa), actions), vcat, WRITE_ACTIONS)
-    return [actions..., STOP_ACTION]
+    retval = []
+    for ma in actions
+        for wa in WRITE_ACTIONS
+            push!(retval, (ma,wa))
+        end
+    end
+    return [retval..., STOP_ACTION]
 end
 
 function initvocab(symbols)
     symbols = collect(symbols)
-    sort!(symbols)
     s2i, i2s = Dict(), Dict()
     c = 1
     for sym in symbols
