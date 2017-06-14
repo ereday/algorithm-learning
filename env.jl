@@ -47,6 +47,10 @@ function init_head(grid,task)
     return get_origin(grid,task)
 end
 
+function init_head(g::Game)
+    return get_origin(g.input_tape,g.task)
+end
+
 function get_origin(grid,task)
     if in(task, ("copy","reverse"))
         return [1,1]
@@ -60,9 +64,9 @@ function get_origin(grid,task)
     error("invalid task: $task")
 end
 
-function move_timestep!(g::Game, symbol, move_action)
-    write_action = symbol == NO_SYMBOL ? NOT_WRITE : WRITE
-    write_action == WRITE && write!(g, symbol)
+function move_timestep!(g::Game, write_symbol, move_action)
+    write_action = write_symbol == NO_SYMBOL ? NOT_WRITE : WRITE
+    write_action == WRITE && write!(g, write_symbol)
     move!(g, move_action)
     g.timestep += 1
     push!(g.prev_actions, (move_action, write_action))
@@ -92,14 +96,14 @@ end
 # FIXME: when it is done? right thing is to check the last action is <s> or not
 function is_done(g::Game)
     len = length(g.output_tape)
-    len > length(g.gold_tape) && return true
+    len >= length(g.gold_tape) && return true
     gold = nothing
     if g.task in ("copy","reverse","walk")
         gold = g.gold_tape[1:len]
     else
         gold = g.gold_tape[end-length(len):end]
     end
-    return g.output_tape == gold
+    return !(g.output_tape == gold)
 end
 
 function make_grid(x)
@@ -116,9 +120,10 @@ function make_grid(x)
 end
 
 function reset!(g::Game)
-    g.prev_actions = ["<s>"]
+    g.prev_actions = [STOP_ACTION]
     g.head = init_head(g.input_tape, g.task)
     g.timestep = 1
+    empty!(g.output_tape)
 end
 
 function read_symbol(grid, head)
@@ -202,21 +207,26 @@ function get_symgold(x,y,a,task)
 end
 
 function make_data(games,s2i,a2i,actions)
-    is_done = false
+    all_done = false
     inputs, outputs, masks = [], [], []
-    while !is_done
+
+    t = 1
+    while !all_done
         input = zeros(Cuchar, length(s2i)+length(a2i), length(games))
         mask = falses(1, length(games))
         symgold = NO_SYMBOL*ones(Int64, length(games))
         actgold = length(a2i)*ones(Int64, length(games))
 
         for (i,game) in enumerate(games)
+            # skip if game is finished
+            game.is_done && continue
+
             input_symbol = read_symbol(game.input_tape, game.head)
             input[s2i[input_symbol],i] = 1
             input[length(s2i)+a2i[game.prev_actions[end]],i] = 1
 
             move_action, write_action = actions[i][game.timestep]
-            y = nothing
+            y = NO_SYMBOL
             if write_action == WRITE
                 mask[1,i] = 1
                 if game.task in ("copy","reverse","walk")
@@ -226,23 +236,27 @@ function make_data(games,s2i,a2i,actions)
                 end
                 symgold[i] = s2i[y]
             end
+
             actgold[i] = a2i[(move_action,write_action)]
             move_timestep!(game,y,move_action)
-            # if move_action == "<s>"
-            #     @show game.gold_tape
-            #     @show game.output_tape
-            # end
-            game.is_done && continue
         end
 
         push!(inputs, input)
         push!(outputs, (symgold,actgold))
         push!(masks, mask)
 
-        is_done = mapreduce(g->g.is_done, (x,y)->x && y, games)
+        all_done = true
+        for k = 1:length(games)
+            if !games[k].is_done
+                all_done = false
+            end
+        end
+
+        # @show t,all_done
+        t+=1
     end
 
-    map!(g->reset!(g), games)
+    for k = 1:length(games); reset!(games[k]); end
     return inputs,outputs,masks
 end
 

@@ -59,9 +59,10 @@ function main(args)
     else
         o[:task] = load(o[:loadfile], "task")
         w = load(o[:loadfile], "w")
+        w = Dict(k=>convert(o[:atype],v) for (k,v) in w)
         # opts - not yet!
         # opts = load(o[:loadfile])
-        o[:start] = load(o[:loadfile], "complexity")
+        # o[:start] = load(o[:loadfile], "complexity")
     end
     opts = initopts(w,o[:optim])
 
@@ -96,20 +97,33 @@ function main(args)
                 w,games,s2i,i2s,a2i,i2a,actions,opts,o[:supervised]; o=o)
             lossval = update_lossval(lossval, this_loss, iter)
 
-            # validate network by running episodes
-            accuracy = validate(w,valid,s2i,i2s,a2i,i2a;o=o)
-
             lossval = update_lossval(lossval,this_loss,iter)
-            println("(iter:$iter,loss:$lossval,accuracy:$accuracy)")
+            if iter % o[:period] == 0
+                accuracy, average_reward = validate(w,valid,s2i,i2s,a2i,i2a;o=o)
+                println("(iter:$iter,loss:$lossval,accuracy:$accuracy,reward:$average_reward)")
+                if accuracy >= o[:threshold]
+                    println("$C converged in $iter iterations")
+                end
 
-            if accuracy >= o[:threshold]
-                println("$C converged in $iter iterations")
+                if accuracy >= o[:threshold] && o[:savefile] != nothing
+                    save(o[:savefile],
+                         "w", Dict(k=>Array(v) for (k,v) in w),
+                         # need something like above for opts
+                         # "opts", opts,
+                         "task", o[:task],
+                         "complexity", C)
+                end
+            end
+
+            if lossval < 0.1
                 save(o[:savefile],
-                     "w", map(Array, w),
+                     "w", Dict(k=>Array(v) for (k,v) in w),
                      # need something like above for opts
                      # "opts", opts,
                      "task", o[:task],
                      "complexity", C)
+                info("saved")
+                return
             end
 
             iter += 1
@@ -194,14 +208,15 @@ function run_episodes!(w,games,s2i,i2s,a2i,i2a,train,supervised;
             move_action, write_action = next_action
 
             # (4) predict symbol
-            symbol = NO_SYMBOL
+            y = NO_SYMBOL
             if write_action == WRITE
-                symbol = predict(w[:wsymb],w[:bsymb],cout)
-                symbol = mapslices(indmax, Array(symbol), 1)[1]
-                symbol = i2s[symbol]
-                move_timestep!(game, symbol, move_action)
+                y = predict(w[:wsymb],w[:bsymb],cout)
+                # symbol = mapslices(indmax, Array(symbol), 1)[1]
+                y = indmax(Array(y))
+                y = i2s[y]
             end
 
+            move_timestep!(game, y, move_action)
             reward = get_reward(game)
             episode_reward += reward
 
@@ -227,6 +242,9 @@ function run_episodes!(w,games,s2i,i2s,a2i,i2a,train,supervised;
         end
 
         cumulative_reward += episode_reward
+        if game.output_tape == game.gold_tape
+            ncorrect += 1
+        end
     end
 
     # q-watkins training if phase is RL train
@@ -235,7 +253,7 @@ function run_episodes!(w,games,s2i,i2s,a2i,i2a,train,supervised;
         reset!(game)
     end
 
-    return ncorrect/length(games)
+    return ncorrect/length(games), cumulative_reward/length(games)
 end
 
 function sltrain!(w,h,c,inputs,outputs,masks,opt; o=Dict())
