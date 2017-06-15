@@ -238,10 +238,21 @@ function run_episodes!(w,games,s2i,i2s,a2i,i2a,train,supervised;
         end
     end
 
-    # q-watkins training if phase is RL train
-
+    # reset games
     for (i,game) in enumerate(games)
         reset!(game)
+    end
+
+    # q-watkins training if phase is RL train
+    if train && !supervised
+        # (1) prepare input data
+        batches = make_batches(histories)
+
+        # (2) train network
+        batchloss = rltrain!(w,batches,opts; o=o)
+
+        # (3) return batchloss
+        return batchloss
     end
 
     return ncorrect/length(games), cumulative_reward/length(games)
@@ -284,14 +295,26 @@ function sltrain!(w,h,c,inputs,outputs,masks,opt; o=Dict())
 end
 
 function rltrain!(w,batches,opt; o=Dict())
-    # dw = similar(w)
-    # for k in keys(w); dw[k] = similar(w[k]); fill!(dw, 0); end
+    dw = similar(w)
+    for k in keys(w); dw[k] = similar(w[k]); fill!(dw, 0); end
+    atype = get(o, :atype, AutoGrad.getval(typeof(w[:wcont])))
 
-    # total = num_samples = 0
-    # batches = make_batches(...)
-    # for batch in batches
+    total = num_samples = 0
+    mapconvert(args...) = map(i->convert(atype,i), args)
+    for (ts,xs,ys,as,ms,hs,cs) in batches
+        values = []
+        ts,xs = mapconvert(ts,xs)
+        if hs != nothing && cs != nothing
+            hs,cs = mapconvert(hs,cs)
+        end
+        gloss = rlgrad(w,ts,xs,ys,as,ms,hs,cs; values=values)
+        total += values[1]; num_samples += values[2]
+        for k in keys(dw); dw[k] += gloss[k]; end
+    end
 
-    # end
+    for k in keys(dw); dw[k] = dw[k]/num_samples; end
+    update!(w,dw,opt)
+    return total/num_samples
 end
 
 function update_lossval(lossval,batchloss,iter)
