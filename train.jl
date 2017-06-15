@@ -73,9 +73,10 @@ function main(args)
         # prepare validation data
         seqlen = div(C, complexities[o[:task]])
         data = map(xi->data_generator(seqlen), [1:o[:nvalid]...])
-        valid = []
+        valid = []; actions = []
         for (input,output,action) in data
             push!(valid, Game(input, output, o[:task]))
+            push!(actions, action)
         end
         empty!(data)
 
@@ -101,10 +102,6 @@ function main(args)
             if iter % o[:period] == 0
                 accuracy, average_reward = validate(w,valid,s2i,i2s,a2i,i2a;o=o)
                 println("(iter:$iter,loss:$lossval,accuracy:$accuracy,reward:$average_reward)")
-                if accuracy >= o[:threshold]
-                    println("$C converged in $iter iterations")
-                end
-
                 if accuracy >= o[:threshold] && o[:savefile] != nothing
                     save(o[:savefile],
                          "w", Dict(k=>Array(v) for (k,v) in w),
@@ -113,17 +110,11 @@ function main(args)
                          "task", o[:task],
                          "complexity", C)
                 end
-            end
 
-            if lossval < 0.1
-                save(o[:savefile],
-                     "w", Dict(k=>Array(v) for (k,v) in w),
-                     # need something like above for opts
-                     # "opts", opts,
-                     "task", o[:task],
-                     "complexity", C)
-                info("saved")
-                return
+                if accuracy >= o[:threshold]
+                    println("$C converged in $iter iterations")
+                    break
+                end
             end
 
             iter += 1
@@ -148,6 +139,7 @@ end
 # this is skeleton for all methods
 function run_episodes!(w,games,s2i,i2s,a2i,i2a,train,supervised;
                        o=Dict(), opts=Dict(), actions=[])
+
     # init state parameters
     atype = get(o, :atype, typeof(w[:wcont]))
     hidden = size(w[:wcont], 1)
@@ -179,7 +171,6 @@ function run_episodes!(w,games,s2i,i2s,a2i,i2a,train,supervised;
 
     # run episodes - for both validation and q-learning
     ncorrect = 0
-    is_done = false
     iter = 1
 
     cumulative_reward = 0

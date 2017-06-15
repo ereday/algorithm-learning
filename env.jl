@@ -124,6 +124,7 @@ function reset!(g::Game)
     g.head = init_head(g.input_tape, g.task)
     g.timestep = 1
     empty!(g.output_tape)
+    g.is_done = false
 end
 
 function read_symbol(grid, head)
