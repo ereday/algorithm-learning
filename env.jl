@@ -146,7 +146,7 @@ type Transition
     nsteps # remaining steps
     h; c # controller states
     action # action has been taken
-    symbol # symbol written to output tape
+    output_symbol # symbol written to output tape
     is_done # last step or not
 end
 
@@ -167,10 +167,14 @@ function take_action(w, b, s, steps_done; o=Dict())
     end
 end
 
-function take_action(w,b,s)
-    s = ndims(s) == 1 ? reshape(s, length(s), 1) : s
-    y = predict(w,b,s)
-    return mapslices(indmax, Array(y), 1)
+function take_action(w,b,s; eps=0.05)
+    if rand() > eps
+        s = ndims(s) == 1 ? reshape(s, length(s), 1) : s
+        y = predict(w,b,s)
+        return mapslices(indmax, Array(y), 1)
+    else
+        return rand(1:size(w,1), size(s,2))
+    end
 end
 
 function get_reward(g::Game)
@@ -180,7 +184,7 @@ function get_reward(g::Game)
     else
         is_desired = g.output_tape == g.gold_tape[end-length(g.output_tape):end]
     end
-    return Int(is_desired)
+    return Int(is_desired && length(g.output_tape) != 0)
 end
 
 function get_remaining_steps(g::Game)

@@ -44,7 +44,12 @@ end
 function logprob(output, ypred, mask=nothing)
     nrows,ncols = size(ypred)
     index = output + nrows*(0:(length(output)-1))
-    index = mask == nothing ? index : index[mask]
+    # FIXME: this is so dirty
+    if mask != nothing && length(mask) != 1
+        index = index[[mask...]]
+    elseif mask != nothing && length(mask) == 1 && !mask[1]
+        return 0
+    end
     o1 = logp(ypred,1)
     # @show index
     o2 = o1[index]
@@ -87,9 +92,6 @@ function sloss(w,x,y,m,h,c; values=[])
 end
 
 slgrad = grad(sloss)
-
-function rloss()
-end
 
 function initweights(
     atype,units,nsymbols,nactions,
@@ -136,37 +138,129 @@ end
 # xs => controller inputs (concat prev_action and read_symbol)
 # ys => controller symbol outputs written to output tape
 # as => actions taken by following behaviour policy
-# targets => temporal difference learning targets
-# TODO: make it sequential?
-function rloss(w, targets, xs, ys, as, h, c, vs; values=[])
+# ts => temporal difference learning targets
+function rloss(w, ts, xs, ys, as, ms, h, c; values=[])
     # propagate controller, same with previous
     cout, h, c = propagate(w[:wcont], w[:bcont], xs, h, c)
 
     # symbol prediction, same
     sympred = predict(w[:wsymb], w[:bsymb], cout)
 
-    # action estimation, same
+    # compute Q estimate
     qsa = predict(w[:wact], w[:bact], cout)
-
-    # compute indices
     nrows, ncols = size(qsa)
     index = as + nrows*(0:(length(as)-1))
-
-    # compute estimate
     qs = qsa[index]  # divide by nsteps remaining
     estimate = reshape(qs, 1, length(qs))
-    estimate = estimate ./ vs
+    ts = reshape(ts, 1, length(ts))
 
-    # hybrid loss calculation
+    # hybrid loss calculation, supervised (symbols), q-learning (actions)
     val = 0
-    val += -0.5*logprob(ys, sympred) # sl loss, output symbols
-    val += 0.5 * sumabs2(targets-estimate) # rl loss, actions
+    val -= 0.5 * logprob(ys, sympred, ms)
+    val += 0.5 * sumabs2(ts-estimate)
 
-    push!(values, val)
-    return val / size(targets,2)
+    push!(values, val, size(ts,2))
+    return val
 end
 
-rlgradient = grad(rloss)
+rlgrad = grad(rloss)
+
+# FIXME: this is so dirty and inefficient
+function make_batches(w,histories,s2i,a2i,discount,nsteps,batchsize; o=Dict())
+    atype = get(o, :atype, typeof(w[:wcont]))
+
+    samples = []
+    for history in histories
+        for k = 1:length(history)-1
+            this = history[k]
+
+            # input formation
+            x = (this.input_symbol,this.prev_action)
+            y = this.output_symbol
+            a = this.action
+            m = y != NO_SYMBOL && !this.is_done
+            ph = this.h
+            pc = this.c
+            vs = this.nsteps
+
+            # target formation
+            T = min(k+nsteps, length(history))
+            rs = reduce(+, [0, map(hi->hi.reward, history[k+1:T])...])
+            yT = history[T].output_symbol
+            target = rs
+            if yT != NO_SYMBOL && !history[T].is_done
+                # compute target
+                xT = (history[T].input_symbol, history[T].prev_action)
+                input = zeros(Cuchar, length(s2i)+length(a2i), 1)
+                input[s2i[xT[1]]] = 1
+                input[length(s2i)+a2i[xT[2]]] = 1
+                input = convert(atype, input)
+
+                vT = history[T].nsteps
+                phT,pcT = history[T].h, history[T].c
+                cout, hT, cT = propagate(w[:wcont],w[:bcont],input,phT,pcT)
+                qsa = predict(w[:wact], w[:bact], cout)
+                qs = maximum(qsa)
+                target += vT * maximum(qs)
+            end
+
+            # normalize target
+            target = target/vs
+
+            sample = (target,x,y,a,m,ph,pc)
+            push!(samples, sample)
+        end
+
+        # episode ending
+        length(history) >= 1 || continue
+        target = history[end].reward / history[end].nsteps
+        x = (history[end].input_symbol, history[end].prev_action)
+        y = history[end].output_symbol
+        a = history[end].action
+        ph = history[end].h
+        pc = history[end].c
+        m = y != NO_SYMBOL && !history[end].is_done
+        sample = (target,x,y,a,m,ph,pc)
+        push!(samples,sample)
+    end
+
+    batches = []
+    for k = 1:batchsize:length(samples)
+        from = k; to = min(from+k-1,length(samples))
+        bsamples = samples[from:to]
+
+        # make target batch
+        ts = mapreduce(s->s[1], vcat, bsamples)
+
+        # make input batch
+        xs = falses(length(s2i)+length(a2i), to-from+1)
+        for j = 1:to-from+1
+            xs[s2i[bsamples[j][2][1]],j] = 1
+            xs[length(s2i)+a2i[bsamples[j][2][2]]] = 1
+        end
+
+        # make output batch
+        ys = map(si->s2i[si[3]], bsamples)
+
+        # make action batch
+        as = map(si->a2i[si[4]], bsamples)
+
+        # make mask batch
+        ms = map(si->si[5], bsamples)
+
+        # make h,c batches
+        hs = cs = nothing
+        if bsamples[1][end-1] != nothing
+            hs = mapreduce(bi->bi[end-1], hcat, bsamples)
+            cs = mapreduce(bi->bi[end], hcat, bsamples)
+        end
+
+        batch = (ts,xs,ys,as,ms,hs,cs)
+        push!(batches, batch)
+    end
+
+    return batches
+end
 
 # compute TD targets for objective
 function compute_targets(samples, w, discount, nsteps, s2i, a2i)
@@ -202,7 +296,7 @@ function compute_targets(samples, w, discount, nsteps, s2i, a2i)
     end
 
     # (2.2) batch environment states - aka controller inputs
-    sa = map(s->(s[end].input_symbol, s[end].input_action), samples)
+    sa = map(s->(s[end].input_symbol, s[end].prev_action), samples)
     inputs = zeros(length(s2i)+length(a2i), length(samples))
     for k = 1:length(sa) # symbol-action pairs
         inputs[s2i[sa[k][1]],k] = 1

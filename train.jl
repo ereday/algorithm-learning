@@ -41,6 +41,7 @@ function main(args)
         ("--update"; default=5000; arg_type=Int64)
         ("--nepisodes"; default=5000; arg_type=Int64)
         ("--threshold"; default=0.98; arg_type=Float64)
+        ("--noreward"; default=10; arg_type=Int64)
     end
 
     isa(args, AbstractString) && (args=split(args))
@@ -132,8 +133,8 @@ end
 # validate games
 function validate(w,games,s2i,i2s,a2i,i2a; o=Dict())
     train = supervised = false
-    accuracy = run_episodes!(w,games,s2i,i2s,a2i,i2a,train,supervised; o=o)
-    return accuracy
+    acc, reward = run_episodes!(w,games,s2i,i2s,a2i,i2a,train,supervised; o=o)
+    return acc, reward
 end
 
 # this is skeleton for all methods
@@ -187,14 +188,15 @@ function run_episodes!(w,games,s2i,i2s,a2i,i2a,train,supervised;
 
             # (2) propage controller
             prev_h = prev_c = nothing
-            if train
+            if train && h != nothing && c != nothing
                 prev_h = Array(h)
                 prev_c = Array(c)
             end
             cout, h, c = propagate(w[:wcont],w[:bcont],convert(atype,input),h,c)
 
             # (3) take action
-            next_action = first(take_action(w[:wact],w[:bact],cout))
+            eps = train ? 0.0 : 0.20
+            next_action = first(take_action(w[:wact],w[:bact],cout; eps=eps))
             next_action = i2a[next_action]
             move_action, write_action = next_action
 
@@ -223,12 +225,17 @@ function run_episodes!(w,games,s2i,i2s,a2i,i2a,train,supervised;
                     remaining_steps,
                     prev_h, prev_c,
                     next_action,
-                    symbol,
+                    y,
                     game.is_done
                 )
 
+                add_history = true
+                if game.is_done
+                    add_history = game.gold_tape == game.output_tape
+                end
+
                 # push it do history
-                push!(histories[i], transition)
+                add_history && push!(histories[i], transition)
             end
         end
 
@@ -245,8 +252,12 @@ function run_episodes!(w,games,s2i,i2s,a2i,i2a,train,supervised;
 
     # q-watkins training if phase is RL train
     if train && !supervised
+        discount = get(o, :discount, -1)
+        batchsize = get(o, :batchsize, length(games))
+
         # (1) prepare input data
-        batches = make_batches(histories)
+        batches = make_batches(
+            w,histories,s2i,a2i,discount,nsteps,batchsize)
 
         # (2) train network
         batchloss = rltrain!(w,batches,opts; o=o)
@@ -296,33 +307,38 @@ end
 
 function rltrain!(w,batches,opt; o=Dict())
     dw = similar(w)
-    for k in keys(w); dw[k] = similar(w[k]); fill!(dw, 0); end
+    for k in keys(w); dw[k] = similar(w[k]); fill!(dw[k], 0); end
     atype = get(o, :atype, AutoGrad.getval(typeof(w[:wcont])))
 
     total = num_samples = 0
     mapconvert(args...) = map(i->convert(atype,i), args)
+    asarray(x) = typeof(x) <: Array ? x : typeof(x)[x]
+    asarrays(xs...) = map(x->asarray(x), xs)
     for (ts,xs,ys,as,ms,hs,cs) in batches
-        values = []
+        ts,ys,as,ms = asarrays(ts,ys,as,ms)
+        # @show ts,ys,as,ms
         ts,xs = mapconvert(ts,xs)
         if hs != nothing && cs != nothing
             hs,cs = mapconvert(hs,cs)
         end
+
+        values = []
         gloss = rlgrad(w,ts,xs,ys,as,ms,hs,cs; values=values)
         total += values[1]; num_samples += values[2]
-        for k in keys(dw); dw[k] += gloss[k]; end
+        for k in keys(gloss); dw[k] += gloss[k]; end
     end
 
-    for k in keys(dw); dw[k] = dw[k]/num_samples; end
+    for k in keys(w); dw[k] = dw[k]/num_samples; end
     update!(w,dw,opt)
     return total/num_samples
 end
 
-function update_lossval(lossval,batchloss,iter)
+function update_lossval(lossval,batchloss,iter,alpha=0.01)
     if iter < 100
         lossval = (iter-1)*lossval + batchloss
         lossval = lossval / iter
     else
-        lossval = 0.01 * batchloss + 0.99 * lossval
+        lossval = alpha * batchloss + (1-alpha) * lossval
     end
     return lossval
 end
